@@ -191,8 +191,7 @@ for iN, NX in enumerate(NX_array):
 
     # allocate arrays and compute grid
     sim = fcimls.FciMlsSim(NX, NY, **kwargs)
-    # sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationLinearVCI
-    sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationConservativeLinearVCI
+    # sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationConservativeLinearVCI
 
     sim.setInitialConditions(f)
 
@@ -200,7 +199,7 @@ for iN, NX in enumerate(NX_array):
 
     # Assemble the mass matrix and forcing term
     sim.computeSpatialDiscretization(f, NQX=NQX, NQY=NQY, Qord=Qord, quadType='g',
-                                     massLumping=False)
+                                     massLumping=False, vci=1)
 
     try:
         dxi.append(sim.xi[1:])

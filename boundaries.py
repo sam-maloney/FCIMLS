@@ -78,8 +78,6 @@ class PeriodicBoundary(Boundary):
         return self.sim.mapping(points, zeta) % ymax % ymax
 
     def findNodesInSupport(self, p):
-        originalShape = p.shape
-        p.shape = (2,)
         support = self.support
         xmax = self.sim.xmax
         ymax = self.sim.ymax
@@ -88,13 +86,13 @@ class PeriodicBoundary(Boundary):
 
         for iPlane in range(self.sim.NX):
             nodeX = self.sim.nodeX[iPlane]
-            dispX = p[0] - nodeX
+            dispX = p.flat[0] - nodeX
             dispX = np.array((dispX, dispX + xmax, dispX - xmax))
             iX = np.argmin(np.abs(dispX))
             dispX = dispX[iX]
             if np.abs(dispX) > support[0]:
                 continue
-            maps = float(self.mapping(p, nodeX))
+            maps = float(self.mapping(p.ravel(), nodeX))
             disps = maps - self.sim.nodeY[iPlane][:-1]
             disps = np.vstack((disps, disps + ymax, disps - ymax))
             iY = np.abs(disps).argmin(axis=0)
@@ -107,8 +105,6 @@ class PeriodicBoundary(Boundary):
         indices = np.concatenate(indices)
         displacements = np.concatenate(displacements) * self.rsupport
         distances = np.abs(displacements)
-
-        p.shape = originalShape
         return indices, displacements, distances
 
     def w(self, p):
@@ -130,6 +126,19 @@ class PeriodicBoundary(Boundary):
 
     def d2w(self, p):
         raise NotImplementedError
+
+    def computeDisplacements(self, p, inds):
+        xmax = self.sim.xmax
+        ymax = self.sim.ymax
+        disps = p.ravel() - self.nodes[inds]
+        dispX = np.vstack((disps[:,0], disps[:,0] + xmax, disps[:,0] - xmax))
+        dispY = np.vstack((disps[:,1], disps[:,1] + ymax, disps[:,1] - ymax))
+        iX = np.abs(dispX).argmin(axis=0)
+        iY = np.abs(dispY).argmin(axis=0)
+        n = len(inds)
+        disps[:,0] = dispX[(iX,np.arange(n))]
+        disps[:,1] = dispY[(iY,np.arange(n))]
+        return disps
 
 
 # class DirichletBoundary(Boundary):

@@ -538,8 +538,10 @@ class FciMlsSim:
         self.uI = sp_la.spsolve(A, self.u)
 
     def computeSpatialDiscretization(self, f=None, NQX=1, NQY=None, Qord=2,
-            quadType='gauss', massLumping=False, **kwargs):
+            quadType='gauss', massLumping=False, vci='linear', **kwargs):
         """Assemble the system discretization matrices K, A, M in CSR format.
+        Implements linear/quadratic variationally consistent integration using
+        assumed strain method of Chen2013 https://doi.org/10.1002/nme.4512
 
         K is the stiffness matrix from the diffusion term
         A is the advection matrix
@@ -566,128 +568,25 @@ class FciMlsSim:
         massLumping : bool, optional
             Determines whether mass-lumping is used to calculate M matrix.
             The default is False.
+        vci : {int, string, None}, optional
+            Order of VCI correction to apply. If int must be 1 or 2, if string
+            must be in ['linear', 'quadratic']. The Default is 'linear'.
 
         Returns
         -------
         None.
 
         """
-        self.vci = None
-        self.vci_solver = None
-        ndim = self.ndim
-        nDoFs = self.nDoFs
-        NX = self.NX
-        NY = self.NY
-        ymax = self.ymax
-        if NQY is None:
-            NQY = NY
-        self.f = f
-        self.NQX = NQX
-        self.NQY = NQY
-        self.Qord = Qord
-        self.quadType = quadType
-        self.massLumping = massLumping
-        # pre-allocate arrays for stiffness matrix triplets
-        nQuads = NQX * NQY * Qord**2
-        nMaxEntries = int((nDoFs * self.boundary.volume)**2 * nQuads * NX)
-        Kdata = np.zeros(nMaxEntries)
-        Adata = np.zeros(nMaxEntries)
-        if not massLumping:
-            Mdata = np.zeros(nMaxEntries)
-        row_ind = np.zeros(nMaxEntries, dtype='uint32')
-        col_ind = np.zeros(nMaxEntries, dtype='uint32')
-        self.b = np.zeros(nDoFs)
-        self.u_weights = np.zeros(nDoFs)
-
-        ##### compute spatial discretizaton
-        index = 0
-        for iPlane in range(NX):
-            dx = self.dx[iPlane]
-            ##### generate quadrature points
-            if quadType.lower() in ('gauss', 'g', 'gaussian'):
-                offsets, weights = roots_legendre(Qord)
-            elif quadType.lower() in ('uniform', 'u'):
-                offsets = np.linspace(1/Qord - 1, 1 - 1/Qord, Qord)
-                weights = np.repeat(2/Qord, Qord)
-            offsets = (offsets * dx * 0.5 / NQX, offsets * ymax * 0.5 / NQY)
-            weights = (weights * dx * 0.5 / NQX, weights * ymax * 0.5 / NQY)
-            quads = ( np.indices([NQX, NQY], dtype='float').T.
-                      reshape(-1, ndim) + 0.5 ) * [dx/NQX, ymax/NQY]
-            quadWeights = np.repeat(1., len(quads))
-            for i in range(ndim):
-                quads = np.concatenate(
-                    [quads + offset*np.eye(ndim)[i] for offset in offsets[i]] )
-                quadWeights = np.concatenate(
-                    [quadWeights * weight for weight in weights[i]] )
-
-            quads += [self.nodeX[iPlane], 0]
-
-            for iQ, quad in enumerate(quads):
-                inds, phis, gradphis = self.dphi(quad)
-                quadWeight = quadWeights[iQ]
-                if f is not None:
-                    self.b[inds] += quadWeight * f(quad) * phis
-                self.u_weights[inds] += quadWeight * phis
-                nEntries = len(inds)**2
-                Kdata[index:index+nEntries] = quadWeight * \
-                    np.ravel( gradphis @ (self.diffusivity @ gradphis.T) )
-                Adata[index:index+nEntries] = quadWeight * \
-                    np.ravel( np.outer(np.dot(gradphis, self.velocity), phis) )
-                if not massLumping:
-                    Mdata[index:index+nEntries] = quadWeight * \
-                        np.ravel( np.outer(phis, phis) )
-                row_ind[index:index+nEntries] = np.repeat(inds, len(inds))
-                col_ind[index:index+nEntries] = np.tile(inds, len(inds))
-                index += nEntries
-
-        self.K = sp.csr_matrix( (Kdata, (row_ind, col_ind)),
-                                shape=(nDoFs, nDoFs) )
-        self.A = sp.csr_matrix( (Adata, (row_ind, col_ind)),
-                                shape=(nDoFs, nDoFs) )
-        if massLumping:
-            self.M = sp.diags(self.u_weights, format='csr')
+        if vci is None:
+            self.vci = None
+        elif vci in [1, 'linear', 'Linear', 'l', 'L']:
+            self.vci = 'VC1 (assumed strain)'
+            vci = 1
+        elif vci in [2, 'quadratic', 'Quadratic', 'q', 'Q']:
+            self.vci = 'VC2 (assumed strain)'
+            vci = 2
         else:
-            self.M = sp.csr_matrix( (Mdata, (row_ind, col_ind)),
-                                shape=(nDoFs, nDoFs) )
-
-    def computeSpatialDiscretizationLinearVCI(self, f=None, NQX=1, NQY=None,
-            Qord=2, quadType='gauss', massLumping=False, **kwargs):
-        """Assemble the system discretization matrices K, A, M in CSR format.
-        Implements linear variationally consistent integration using assumed
-        strain method of Chen2013 https://doi.org/10.1002/nme.4512
-
-        K is the stiffness matrix from the diffusion term
-        A is the advection matrix
-        M is the mass matrix from the time derivative
-
-        Parameters
-        ----------
-        f : {callable, None}, optional
-            Forcing function. Must take 2D array of points and return 1D array.
-            The default is None.
-        NQX : int, optional
-            Number of quadrature cell divisions between FCI planes.
-            The default is 1.
-        NQY : {int, None}, optional
-            Number of quadrature cell divisions in y-direction.
-            The default is None, which sets NQY = NY.
-        Qord : int, optional
-            Number of quadrature points in each grid cell along one dimension.
-            The default is 2.
-        quadType : string, optional
-            Type of quadrature to be used. Must be either 'gauss' or 'uniform'.
-            Produces either Gauss-Legendre or Newton-Cotes type points/weights.
-            The default is 'gauss'.
-        massLumping : bool, optional
-            Determines whether mass-lumping is used to calculate M matrix.
-            The default is False.
-
-        Returns
-        -------
-        None.
-
-        """
-        self.vci = 'VC1 (assumed strain)'
+             raise ValueError('Unknown VCI order vci={vci}')
         self.vci_solver = None
         ndim = self.ndim
         nDoFs = self.nDoFs
@@ -714,8 +613,17 @@ class FciMlsSim:
         self.u_weights = np.zeros(nDoFs)
 
         self.store = []
-        self.areas = np.zeros(nDoFs)
-        self.xis = np.zeros((self.nDoFs, self.ndim))
+
+        if vci == 2:
+            A = np.zeros((self.nNodes, 3, 3))
+            self.rOld = np.zeros((self.nNodes, self.ndim, 3))
+            self.rNew = np.zeros((self.nNodes, self.ndim, 3))
+            xis = np.empty((self.nNodes, self.ndim, 3))
+        else:
+            self.gradphiSumsOld = np.zeros((self.nDoFs, self.ndim))
+            self.gradphiSumsNew = self.gradphiSumsOld
+            if vci == 1:
+                areas = np.zeros(nDoFs)
 
         ##### compute spatial discretizaton
         for iPlane in range(NX):
@@ -741,20 +649,54 @@ class FciMlsSim:
             for iQ, quad in enumerate(quads):
                 inds, phis, gradphis = self.dphi(quad)
                 quadWeight = quadWeights[iQ]
-                self.store.append((inds, phis, gradphis, quadWeight))
-                self.areas[inds] += quadWeight
-                self.xis[inds] -= gradphis * quadWeight
+                if vci == 2:
+                    disps = self.boundary.computeDisplacements(quad, inds)
+                    self.store.append((inds, phis, gradphis, quadWeight, disps))
+                    P = np.hstack((np.ones((len(inds), 1)), disps))
+                    A[inds] += quadWeight * \
+                        np.apply_along_axis(lambda x: np.outer(x,x), 1, P)
+                    self.rOld[inds,:,0] -= gradphis * quadWeight
+                    self.rOld[inds,0,1] -= phis * quadWeight
+                    self.rOld[inds,1,2] -= phis * quadWeight
+                    self.rOld[inds,:,1:] -= np.apply_along_axis(lambda x: np.outer(x[0:2],
+                        x[2:4]), 1, np.hstack((gradphis, disps))) * quadWeight
+                else:
+                    self.store.append((inds, phis, gradphis, quadWeight))
+                    self.gradphiSumsOld[inds] += gradphis * quadWeight
+                    if vci == 1:
+                        areas[inds] += quadWeight
                 if f is not None:
                     self.b[inds] += quadWeight * f(quad) * phis
 
-        self.gradphiSumsOld = -self.xis.copy()
-        self.gradphiSumsNew = np.zeros((nDoFs, 2))
-        self.xis /= self.areas.reshape(-1,1)
+        if vci == 1:
+            xis = -self.gradphiSumsOld / areas.reshape(-1,1)
+            self.gradphiSumsNew = np.zeros((nDoFs, 2))
+        elif vci == 2:
+            self.gradphiSumsOld = self.rOld[:nDoFs,:,0]
+            self.gradphiSumsNew = self.rNew[:nDoFs,:,0]
+            for i, row in enumerate(A):
+                lu, piv = la.lu_factor(A[i], True, False)
+                for j in range(self.ndim):
+                    xis[i,j] = la.lu_solve((lu, piv), self.rOld[i,j], 0, False, False)
 
         index = 0
-        for (inds, phis, gradphis, quadWeight) in self.store:
-            testgrads = gradphis + self.xis[inds]
-            self.gradphiSumsNew[inds] += testgrads * quadWeight
+        for items in self.store:
+            if vci == 2:
+                inds, phis, gradphis, quadWeight, disps = items
+                testgrads = ( gradphis + xis[inds,:,0] +
+                    xis[inds,:,1]*disps[:,0:1] + xis[inds,:,2]*disps[:,1:2] )
+                self.rNew[inds,:,0] -= testgrads * quadWeight
+                self.rNew[inds,0,1] -= phis * quadWeight
+                self.rNew[inds,1,2] -= phis * quadWeight
+                self.rNew[inds,:,1:] -= np.apply_along_axis(lambda x: np.outer(x[0:2],
+                    x[2:4]), 1, np.hstack((testgrads, disps))) * quadWeight
+            else:
+                inds, phis, gradphis, quadWeight = items
+                if vci == 1:
+                    testgrads = gradphis + xis[inds]
+                    self.gradphiSumsNew[inds] += testgrads * quadWeight
+                else:
+                    testgrads = gradphis
             self.u_weights[inds] += quadWeight * phis
             nEntries = len(inds)**2
             Kdata[index:index+nEntries] = quadWeight * \
@@ -876,7 +818,7 @@ class FciMlsSim:
             for iQ, quad in enumerate(quads):
                 inds, phis, gradphis = self.dphi(quad)
                 quadWeight = quadWeights[iQ]
-                disps = quad - self.nodes[inds]
+                disps = self.boundary.computeDisplacements(quad, inds)
                 rNews = np.apply_along_axis(lambda x: np.outer(x[0:2],
                     x[2:4]), 1, np.hstack((gradphis, disps)))
                 self.store.append((inds, phis, gradphis, quadWeight, rNews))
