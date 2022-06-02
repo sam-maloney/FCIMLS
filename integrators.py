@@ -29,7 +29,7 @@ class Integrator(metaclass=ABCMeta):
         Current timestep of the simulation.
     time : float
         Current time of the simulation; equal to timestep*dt.
-    sim : FciFemSim
+    sim : FciMlsSim
         Parent simulation class to which the integrator belongs.
 
     """
@@ -39,12 +39,12 @@ class Integrator(metaclass=ABCMeta):
     def name(self):
         raise NotImplementedError
 
-    def __init__(self, fciFemSim, dt):
+    def __init__(self, fciMlsSim, dt):
         """Initialize attributes of the time-integration scheme.
 
         Parameters
         ----------
-        fciFemSim : FciFemSim
+        fciMlsSim : FciMlsSim
             Parent simulation class to which the integrator belongs.
         dt : float
             Time interval between each successive timestep.
@@ -54,7 +54,7 @@ class Integrator(metaclass=ABCMeta):
         None.
 
         """
-        self.sim = fciFemSim
+        self.sim = fciMlsSim
         self.time = 0.0
         self.timestep = 0
         self.dt = dt
@@ -156,8 +156,8 @@ class BackwardEuler(Integrator):
     @property
     def name(self): return 'BackwardEuler'
 
-    def __init__(self, fciFemSim, R, M, dt, P='ilu', **kwargs):
-        super().__init__(fciFemSim, dt)
+    def __init__(self, fciMlsSim, R, M, dt, P='ilu', **kwargs):
+        super().__init__(fciMlsSim, dt)
         self.RHS = M / dt
         self.LHS = self.RHS - R
         self.precondition(P, **kwargs)
@@ -167,8 +167,8 @@ class CrankNicolson(Integrator):
     @property
     def name(self): return 'CrankNicolson'
 
-    def __init__(self, fciFemSim, R, M, dt, P='ilu', **kwargs):
-        super().__init__(fciFemSim, dt)
+    def __init__(self, fciMlsSim, R, M, dt, P='ilu', **kwargs):
+        super().__init__(fciMlsSim, dt)
         self.RHS = M/dt + 0.5*R
         self.LHS = self.RHS - R
         self.precondition(P, **kwargs)
@@ -178,15 +178,15 @@ class LowStorageRK(Integrator):
     @property
     def name(self): return 'LowStorageRungeKutta'
 
-    def __init__(self, fciFemSim, R, M, dt, P='ilu', betas=4, **kwargs):
-        super().__init__(fciFemSim, dt)
+    def __init__(self, fciMlsSim, R, M, dt, P='ilu', betas=4, **kwargs):
+        super().__init__(fciMlsSim, dt)
         self.RHS = R
         self.dudt = np.zeros(self.sim.nNodes)
         if isinstance(betas, np.ndarray):
             self.betas = betas
         else:
             self.betas = np.array([1/n for n in range(betas, 0, -1)])
-        if fciFemSim.massLumping:
+        if fciMlsSim.massLumping:
             self.LHS = M.power(-1)
             self.step = self.stepMassLumped
         else:

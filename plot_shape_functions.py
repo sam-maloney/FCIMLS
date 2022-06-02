@@ -24,17 +24,18 @@ def hat(points):
 n = 100
 xmax = 1.
 
-# mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*xmax, xmax)
-mapping = fcimls.mappings.LinearMapping(1/xmax)
+mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*xmax, xmax)
+# mapping = fcimls.mappings.LinearMapping(1/xmax)
 # mapping = fcimls.mappings.StraightMapping()
 
 perturbation = 0.
 kwargs={
     'mapping' : mapping,
+    'boundary' : ('Dirichlet', (1.5, None, None)),
     # 'boundary' : ('periodic', 1.5),
-    # 'basis' : 'linear',
-    'boundary' : ('periodic', 2.5),
-    'basis' : 'quadratic',
+    'basis' : 'linear',
+    # 'boundary' : ('periodic', 2.5),
+    # 'basis' : 'quadratic',
     'kernel' : 'cubic',
     'velocity' : np.array([0., 0.]),
     'diffusivity' : 1., # Makes diffusivity matrix K into Poisson operator
@@ -49,7 +50,7 @@ tolerance = 1e-10
 
 # Initialize simulation
 NX = 4
-NY = 8
+NY = 4
 sim = fcimls.FciMlsSim(NX=NX, NY=NY, **kwargs)
 
 points = ( np.indices(np.repeat(n+1, 2), dtype='float64')
@@ -74,18 +75,25 @@ plotVar = phis
 # plotVar = gradphis[:,:,1]
 maxAbs = np.max(np.abs(plotVar))
 
-for j in range(NY):
-    for i in range(NX):
+if sim.boundary.name is 'periodic':
+    nx = NX
+    ny = NY
+elif sim.boundary.name is 'Dirichlet':
+    nx = NX + 1
+    ny = NY + 1
+
+for j in range(ny):
+    for i in range(nx):
         # plot the result
-        plt.subplot(NY,NX,NX*NY-(j+1)*NX+i+1)
-        plt.tripcolor(points[:,0], points[:,1], plotVar[:,i*NY+j],
+        plt.subplot(ny,nx,nx*ny-(j+1)*nx+i+1)
+        plt.tripcolor(points[:,0], points[:,1], plotVar[:,i*ny+j],
             shading='gouraud', vmin=-maxAbs , vmax=maxAbs, cmap='seismic')
         plt.colorbar()
         if j == 0:
             plt.xlabel(r'$x$')
         if i == 0:
             plt.ylabel(r'$y$', rotation=0)
-        plt.title('$\Phi_{{{0}}}$'.format(i*NY+j))
+        plt.title('$\Phi_{{{0}}}$'.format(i*ny+j))
         plt.xticks([0, 1])
         plt.yticks([0, 1])
         # plt.xticks([0.0, 0.5, 1.0])

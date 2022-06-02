@@ -45,7 +45,7 @@ import numpy as np
 class Kernel(metaclass=ABCMeta):
     @property
     @abstractmethod
-    def form(self): pass
+    def name(self): pass
 
     @abstractmethod
     def w(self, r):
@@ -109,7 +109,7 @@ class Kernel(metaclass=ABCMeta):
 
 class LinearSpline(Kernel):
     @property
-    def form(self):
+    def name(self):
         return 'linear'
 
     def w(self, r):
@@ -141,7 +141,7 @@ class LinearSpline(Kernel):
 
 class QuadraticSpline(Kernel):
     @property
-    def form(self):
+    def name(self):
         return 'quadratic'
 
     def w(self, r):
@@ -191,7 +191,7 @@ class QuadraticSpline(Kernel):
 
 class SimpleCubicSpline(Kernel):
     @property
-    def form(self):
+    def name(self):
         return 'simpleCubic'
 
     def w(self, r):
@@ -226,7 +226,7 @@ class SimpleCubicSpline(Kernel):
 
 class CubicSpline(Kernel):
     @property
-    def form(self):
+    def name(self):
         return 'cubic'
 
     def w(self, r):
@@ -276,7 +276,7 @@ class CubicSpline(Kernel):
 
 class QuarticSpline(Kernel):
     @property
-    def form(self):
+    def name(self):
         return 'quartic'
 
     def w(self, r):
@@ -311,7 +311,7 @@ class QuarticSpline(Kernel):
 
 class QuinticSpline(Kernel):
     @property
-    def form(self):
+    def name(self):
         return 'quintic'
 
     def w(self, r):
@@ -376,7 +376,7 @@ class QuinticSpline(Kernel):
 
 class SimpleQuinticSpline(Kernel):
     @property
-    def form(self):
+    def name(self):
         return 'simpleQuintic'
 
     def w(self, r):
@@ -411,7 +411,7 @@ class SimpleQuinticSpline(Kernel):
 
 class GenericSpline(Kernel):
     @property
-    def form(self):
+    def name(self):
         return 'generic'
 
     def __init__(self, n=1):
@@ -451,7 +451,7 @@ class Gaussian(Kernel):
     c2 = 1/(1 - np.exp(-9))
 
     @property
-    def form(self):
+    def name(self):
         return 'gaussian'
 
     def w(self, r):
@@ -487,7 +487,7 @@ class Gaussian(Kernel):
 class Bump(Kernel):
 
     @property
-    def form(self):
+    def name(self):
         return 'bump'
 
     def w(self, r):

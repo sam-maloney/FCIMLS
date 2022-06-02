@@ -17,30 +17,41 @@ class sinXsinY:
     ymax = 1.
     xfac = 2*np.pi/xmax
     yfac = 2*np.pi/ymax
-    umax = (1 / (xfac**2 + yfac**2))
-    dudxMax = umax*xfac
-    dudyMax = umax*yfac
 
     def __call__(self, p):
         x = p.reshape(-1,2)[:,0]
         y = p.reshape(-1,2)[:,1]
         return np.sin(self.xfac*x)*np.sin(self.yfac*y)
 
-    def solution(self, p):
-        return self.umax * self(p)
+class QuadraticTestProblem:
+    xmax = 1.
+    ymax = 1.
+    n = 3
+    N = (2*np.pi/ymax)*n
+    b = 0.05
+    # define a such that (0, 0) maps to (xmax, 1) for given b and xmax
+    a = (1 - b*xmax)/xmax**2
 
-f = sinXsinY()
+    def __call__(self, p):
+        x = p.reshape(-1,2)[:,0]
+        y = p.reshape(-1,2)[:,1]
+        return x*np.sin(2*np.pi*self.n*(y - self.a*x**2 - self.b*x))
+
+# f = sinXsinY()
+f = QuadraticTestProblem()
 
 mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
 # mapping = fcimls.mappings.LinearMapping(1/f.xmax)
 # mapping = fcimls.mappings.StraightMapping()
 
-perturbation = 0.
+perturbation = 0.1
 kwargs={
     'mapping' : mapping,
-    # 'boundary' : ('periodic', 1.5),
+    # 'boundary' : ('Dirichlet', (1.5, f, None)),
+    # # 'boundary' : ('periodic', 1.5),
     # 'basis' : 'linear',
-    'boundary' : ('periodic', 2.5),
+    'boundary' : ('Dirichlet', (2.5, f, None)),
+    # 'boundary' : ('periodic', 2.5),
     'basis' : 'quadratic',
     'kernel' : 'cubic',
     'velocity' : np.array([0., 0.]),
@@ -52,8 +63,8 @@ kwargs={
     'ymax' : f.ymax }
 
 # allocate arrays for convergence testing
-start = 8
-stop = 8
+start = 2
+stop = 6
 nSamples = stop - start + 1
 NX_array = np.logspace(start, stop, num=nSamples, base=2, dtype='int32')
 E_inf = np.empty(nSamples, dtype='float64')
@@ -70,12 +81,12 @@ for iN, NX in enumerate(NX_array):
     sim = fcimls.FciMlsSim(NX, NY, **kwargs)
     sim.setInitialConditions(f)
 
-    print(f'NX = {NX},\tNY = {NY},\tnNodes = {sim.nDoFs}')
+    print(f'NX = {NX},\tNY = {NY},\tnNodes = {sim.nNodes}')
 
 
     # Assemble the mass matrix and forcing term
     sim.computeSpatialDiscretization(f, NQX=1, NQY=NY, Qord=2, quadType='g',
-                                     massLumping=False)
+                                     massLumping=False, vci=1)
 
     sim.uI = sp_la.spsolve(sim.M, sim.b)
     sim.solve()
@@ -84,7 +95,7 @@ for iN, NX in enumerate(NX_array):
     u_exact = f(sim.nodes)
     u_diff = sim.u - u_exact
     E_inf[iN] = np.linalg.norm(u_diff, np.inf)
-    E_2[iN] = np.linalg.norm(u_diff)/np.sqrt(sim.nDoFs)
+    E_2[iN] = np.linalg.norm(u_diff)/np.sqrt(sim.nNodes)
 
     print(f'max error = {E_inf[iN]}')
     print(f'L2 error  = {E_2[iN]}\n')

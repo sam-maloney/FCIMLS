@@ -19,79 +19,65 @@ import fcimls
 xmax = 1.
 ymax = 1.
 
-def gaussian(points):
+def gaussian(p):
     A = 1.0
     x0 = 0.5
     y0 = 0.5
     xsigma = 0.15
     ysigma = 0.15
-    return np.exp(-0.5*A*( (points[:,0] - x0)**2/xsigma**2 +
-                           (points[:,1] - y0)**2/ysigma**2 ) )
+    return np.exp(-0.5*A*( (p[:,0] - x0)**2/xsigma**2 +
+                           (p[:,1] - y0)**2/ysigma**2 ) )
 
-def hat(points):
-    return np.hstack((points > 0.25, points < 0.75)).all(1).astype('float64')
+def hat(p):
+    return np.hstack((p > 0.25, p < 0.75)).all(1).astype('float64')
 
-def g(points):
+def g(p):
     k = 1
-    return np.sin(k*np.pi*points[:,0]) * np.sinh(k*np.pi*points[:,1])
+    return np.sin(k*np.pi*p[:,0]) * np.sinh(k*np.pi*p[:,1])
 
-def one(points):
-    return np.ones(len(points), dtype='float64')
+def constant(p):
+    return 1*np.ones(p.size // 2)
 
-def x(points):
-    return points[:,0]
+def linearPatch(p):
+    x = p.reshape(-1,2)[:,0]
+    y = p.reshape(-1,2)[:,1]
+    return 1*x + 2*y
 
-def y(points):
-    return points[:,1]
+def quadraticPatch(p):
+    x = p.reshape(-1,2)[:,0]
+    y = p.reshape(-1,2)[:,1]
+    return 0.1*x + 0.8*y + 0.8*x*x + 1.2*x*y + 0.6*y*y
 
-def xpy(points):
-    return points[:,0] + points[:,1]
+def x2y2(p):
+    return p[:,0]**2 * p[:,1]**2
 
-def x2(points):
-    return points[:,0]**2
+def sinxy(p):
+    return np.sin(np.pi*(p[:,0]*p[:,1]))
 
-def y2(points):
-    return points[:,1]**2
+def sinxpy(p):
+    kx = 1
+    ky = 0
+    return np.sin(np.pi*(kx*p[:,0] + ky*p[:,1]))
 
-def xy(points):
-    return points[:,0] * points[:,1]
+def sinxsiny(p):
+    return np.sin(np.pi*p[:,0])*np.sin(np.pi*p[:,1])
 
-def x2y2(points):
-    return points[:,0]**2 * points[:,1]**2
+func = quadraticPatch
 
-def sinx(points):
-    return np.sin(np.pi*points[:,0])
-
-def sin2x(points):
-    return np.sin(2*np.pi*points[:,0])
-
-def siny(points):
-    return np.sin(np.pi*points[:,1])
-
-def sin2y(points):
-    return np.sin(2*np.pi*points[:,1])
-
-def sinxy(points):
-    return np.sin(np.pi*(points[:,0]*points[:,1]))
-
-def sinxpy(points):
-    return np.sin(np.pi*(points[:,0]+points[:,1]))
-
-def sinxsiny(points):
-    return np.sin(np.pi*points[:,0])*np.sin(np.pi*points[:,1])
-
-func = gaussian
-
-# mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*xmax, xmax)
+mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*xmax, xmax)
 # mapping = fcimls.mappings.LinearMapping(1/xmax)
-mapping = fcimls.mappings.StraightMapping()
+# mapping = fcimls.mappings.StraightMapping()
 
-perturbation = 0.
+perturbation = 0.1
 kwargs={
     'mapping' : mapping,
-    'boundary' : ('periodic', 1.5),
+    # 'boundary' : ('Dirichlet', (1.5, func, None)),
+    # # 'boundary' : ('periodic', 1.5),
+    # 'basis' : 'linear',
+    'boundary' : ('Dirichlet', (2.5, func, None)),
+    # 'boundary' : ('periodic', 2.5),
+    'basis' : 'quadratic',
     'kernel' : 'cubic',
-    'basis' : 'linear',
     'velocity' : np.array([0., 0.]),
     'diffusivity' : 1., # Makes diffusivity matrix K into Poisson operator
     'px' : perturbation,

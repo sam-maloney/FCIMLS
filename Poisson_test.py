@@ -14,6 +14,36 @@ import fcimls
 
 from timeit import default_timer
 
+class QuadraticTestProblem:
+    xmax = 1.
+    ymax = 1.
+    n = 3
+    N = (2*np.pi/ymax)*n
+    # a = 0.01
+    b = 0.05
+    # define a such that (0, 0) maps to (xmax, 1) for given b and xmax
+    a = (1 - b*xmax)/xmax**2
+
+    umax = xmax
+    dudyMax = N*xmax
+    dudxMax = 1 + 2*a*N*xmax**2 + b*N*xmax
+    dudQMax = 1 # technically also reduced by slope of mapping
+
+    def __call__(self, p):
+        x = p.reshape(-1,2)[:,0]
+        y = p.reshape(-1,2)[:,1]
+        N = self.N
+        a = self.a
+        b = self.b
+        return N*(N*x*(4*a**2*x**2 + 4*a*b*x + b**2 + 1)*np.sin(N*(y - a*x**2 - b*x))
+                  + 2*(3*a*x + b)*np.cos(N*(y - a*x**2 - b*x)))
+
+    def solution(self, p):
+        x = p.reshape(-1,2)[:,0]
+        y = p.reshape(-1,2)[:,1]
+        return x*np.sin(self.N*(y - self.a*x**2 - self.b*x))
+
+
 class slantedTestProblem:
     xmax = 1.
     ymax = 1.
@@ -103,8 +133,6 @@ class linearPatch:
     xmax = 1.
     ymax = 1.
     umax = 1.
-    _x = 1.
-    _y = 2.
 
     def __call__(self, p):
         nPoints = p.size // 2
@@ -113,17 +141,14 @@ class linearPatch:
     def solution(self, p):
         x = p.reshape(-1,2)[:,0]
         y = p.reshape(-1,2)[:,1]
-        return self._x*x + self._y*y
+        return 1*x + 2*y
 
 
 class quadraticPatch:
     xmax = 1.
     ymax = 1.
     umax = 1.
-    x  = 0.1
-    y  = 0.8
     xx = 0.8
-    xy = 1.2
     yy = 0.6
 
     def __call__(self, p):
@@ -133,24 +158,28 @@ class quadraticPatch:
     def solution(self, p):
         x = p.reshape(-1,2)[:,0]
         y = p.reshape(-1,2)[:,1]
-        return self.x*x + self.y*y + self.xx*x*x + self.xy*x*y + self.yy*y*y
+        return 0.5 + 0.1*x + 0.8*y + 1.2*x*y + self.xx*x*x + self.yy*y*y
 
+f = QuadraticTestProblem()
 # f = slantedTestProblem()
 # f = simplifiedSlantProblem()
-f = sinXsinY()
+# f = sinXsinY()
 # f = linearPatch()
 # f = quadraticPatch()
 
 # mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
+mapping = fcimls.mappings.QuadraticMapping(f.a, f.b)
 # mapping = fcimls.mappings.LinearMapping(1/f.xmax)
-mapping = fcimls.mappings.StraightMapping()
+# mapping = fcimls.mappings.StraightMapping()
 
 perturbation = 0.1
 kwargs={
     'mapping' : mapping,
-    # 'boundary' : ('periodic', 1.5),
+    # 'boundary' : ('Dirichlet', (1.5, f.solution, None)),
+    # # 'boundary' : ('periodic', 1.5),
     # 'basis' : 'linear',
-    'boundary' : ('periodic', 2.5),
+    'boundary' : ('Dirichlet', (2.5, f.solution, None)),
+    # 'boundary' : ('periodic', 2.5),
     'basis' : 'quadratic',
     'kernel' : 'cubic',
     'velocity' : np.array([0., 0.]),
@@ -163,7 +192,7 @@ kwargs={
 
 # allocate arrays for convergence testing
 start = 2
-stop = 5
+stop = 4
 nSamples = np.rint(stop - start + 1).astype('int')
 NX_array = np.logspace(start, stop, num=nSamples, base=2, dtype='int')
 E_inf = np.empty(nSamples)
@@ -195,25 +224,26 @@ for iN, NX in enumerate(NX_array):
 
     sim.setInitialConditions(f)
 
-    print(f'NX = {NX},\tNY = {NY},\tnDoFs = {sim.nDoFs}')
+    print(f'NX = {NX},\tNY = {NY},\tnNodes = {sim.nNodes}')
 
     # Assemble the mass matrix and forcing term
     sim.computeSpatialDiscretization(f, NQX=NQX, NQY=NQY, Qord=Qord, quadType='g',
-                                     massLumping=False, vci=1)
+                                     massLumping=False, vci=2)
 
     try:
         dxi.append(sim.xi[1:])
     except:
         pass
 
-    ##### Enforce exact solution constraints directly #####
-    # Sets all nodes on x and y axes via strong-form co-location
-    for n, node in enumerate(sim.DoFs):
-        if node.prod() == 0.:
-            inds, phis = sim.phi(node)
-            sim.K.data[sim.K.indptr[n]:sim.K.indptr[n+1]] = 0.
-            sim.K[n,inds] = phis
-            sim.b[n] = f.solution(sim.DoFs[n])
+    if sim.boundary.name is 'periodic':
+        ##### Enforce exact solution constraints directly #####
+        # Sets all nodes on x and y axes via strong-form co-location
+        for n, node in enumerate(sim.nodes):
+            if node.prod() == 0.:
+                inds, phis = sim.phi(node)
+                sim.K.data[sim.K.indptr[n]:sim.K.indptr[n+1]] = 0.
+                sim.K[n,inds] = phis
+                sim.b[n] = f.solution(sim.nodes[n])
 
     t_setup[iN] = default_timer()-start_time
     print(f'setup time = {t_setup[iN]:.8e} s')
@@ -222,7 +252,10 @@ for iN, NX in enumerate(NX_array):
     # Solve for the approximate solution
     # u = sp_la.spsolve(sim.K, sim.b)
     tolerance = 1e-10
-    sim.uI, info = sp_la.lgmres(sim.K, sim.b, tol=tolerance, atol=tolerance)
+    K, b = sim.boundary.modifyOperatorMatrix(sim.K, sim.b)
+    uI, info = sp_la.lgmres(K, b, tol=tolerance, atol=tolerance)
+    sim.uI = uI[:sim.nNodes]
+    # sim.uI, info = sp_la.lgmres(sim.K, sim.b, tol=tolerance, atol=tolerance)
     sim.solve()
 
     t_solve[iN] = default_timer()-start_time
@@ -230,9 +263,9 @@ for iN, NX in enumerate(NX_array):
     start_time = default_timer()
 
     # compute the analytic solution and normalized error norms
-    uExact = f.solution(sim.DoFs)
+    uExact = f.solution(sim.nodes)
     E_inf[iN] = np.linalg.norm(sim.u - uExact, np.inf) / f.umax
-    E_2[iN] = np.linalg.norm(sim.u - uExact)/np.sqrt(sim.nDoFs) / f.umax
+    E_2[iN] = np.linalg.norm(sim.u - uExact)/np.sqrt(sim.nNodes) / f.umax
 
     print(f'max error  = {E_inf[iN]:.8e}')
     print(f'L2 error   = {E_2[iN]:.8e}\n', flush=True)
@@ -240,6 +273,8 @@ for iN, NX in enumerate(NX_array):
 # print summary
 print(f'xmax = {f.xmax}, {mapping}')
 print(f'px = {kwargs["px"]}, py = {kwargs["py"]}, seed = {kwargs["seed"]}')
+print(f'basis = {sim.basis.name}, kernel = {sim.kernel.name}')
+print(f'boundary = {sim.boundary}')
 print(f'NQX = {NQX}, NQY = {NQY//NY}*NY, Qord = {Qord}')
 print(f'VCI: {sim.vci} using {sim.vci_solver}\n')
 with np.printoptions(formatter={'float': lambda x: format(x, '.8e')}):
@@ -284,9 +319,9 @@ ax1 = plt.subplot(121)
 ax1.set_title('Final Solution')
 # field = ax1.tripcolor(sim.X, sim.Y, error, shading='gouraud'
 #                        ,cmap='seismic', vmin=vmin, vmax=vmax)
-# field = ax1.tripcolor(sim.DoFs[:,0], sim.DoFs[:,1], sim.u - uExact
+# field = ax1.tripcolor(sim.nodes[:,0], sim.nodes[:,1], sim.u - uExact
 #                     ,shading='gouraud', cmap='seismic', vmin=vmin, vmax=vmax)
-# field = ax1.tripcolor(sim.DoFs[:,0], sim.DoFs[:,1], sim.u, shading='gouraud')
+# field = ax1.tripcolor(sim.nodes[:,0], sim.nodes[:,1], sim.u, shading='gouraud')
 field = ax1.tripcolor(sim.X, sim.Y, sim.U, shading='gouraud')
 # field = ax1.tripcolor(sim.X, sim.Y, exactSol, shading='gouraud')
 # field = ax1.tripcolor(sim.X, sim.Y, f(np.vstack((sim.X,sim.Y)).T), shading='gouraud')

@@ -38,8 +38,8 @@ class FciMlsSim:
         y-coords of nodes on each FCI plane (includes right/top boundaries).
     idy : numpy.ndarray, shape=(NX+1, NY)
         1/spacing between nodes on each FCI plane (includes right boundary).
-    nDoFs : int
-        Number of unique nodal points in the simulation domain (equals NX*NY).
+    nNodes : int
+        Number of unique nodal points in the simulation domain.
     mapping : mappings.Mapping
         Mapping function for the FCIMLS method.
     boundary : boundaries.Boundary
@@ -73,7 +73,7 @@ class FciMlsSim:
         The advection matrix
     M : scipy.sparse.csr_matrix
         The mass matrix from the time derivative
-    b : numpy.ndarray, shape=(nDoFs,)
+    b : numpy.ndarray, shape=(nNodes,)
         RHS forcing vector generated from source/sink function f.
     integrator : Integrator
         Object defining time-integration scheme to be used.
@@ -93,10 +93,18 @@ class FciMlsSim:
     setInitialConditions(self, u0, mapped=True)
         Initialize the nodal coefficients for the given IC.
     computeSpatialDiscretization(self, f=None, NQX=1, NQY=None, Qord=2,
-                                 quadType='gauss', massLumping=False, **kwargs)
+            quadType='gauss', massLumping=False, vci='linear', **kwargs)
         Assemble the system discretization matrices K, A, M in CSR format.
+    initializeTimeIntegrator(self, integrator, dt, P='ilu', **kwargs):
+        Initialize and register the time integration scheme to be used.
+    step(self, nSteps=1, **kwargs):
+        Advance the simulation a given number of timesteps.
     solve(self)
         Reconstruct the final solution vector, u, from the shape functions.
+    generatePlottingPoints(self, nx=1, ny=1):
+        Generate set of interpolation points to use for plotting.
+    computePlottingSolution(self):
+        Compute interpolated solution at the plotting points.
 
     """
 
@@ -184,7 +192,7 @@ class FciMlsSim:
             self.nodeX = xmax*np.arange(NX+1)/NX
             px *= xmax/NX
             self.nodeX[1:-1] += rng.uniform(-px, px, self.nodeX[1:-1].shape)
-        self.nodeY = np.tile(np.linspace(0, 1, NY+1), NX+1).reshape(NX+1,-1)
+        self.nodeY = np.tile(np.linspace(0, ymax, NY+1), NX+1).reshape(NX+1,-1)
         py /= NY
         self.nodeY[:-1,1:-1] += rng.uniform(-py, py, self.nodeY[:-1,1:-1].shape)
         self.nodeY[-1] = self.nodeY[0]
@@ -196,15 +204,13 @@ class FciMlsSim:
         elif boundary[0].lower() in ('periodic', 'p'):
             self.boundary = boundaries.PeriodicBoundary(self, boundary[1])
         elif boundary[0].lower() in ('dirichlet', 'd'):
-            self.boundary = boundaries.DirichletBoundary(self, boundary[1])
+            self.boundary = boundaries.DirichletBoundary(self, *boundary[1])
         else:
             raise TypeError(f"Unkown boundary condition: {boundary}")
-        self.nDoFs = self.boundary.nDoFs
-        self.nNodes = self.boundary.nNodes
         self.nodes = self.boundary.computeNodes()
-        self.DoFs = self.nodes[:self.nDoFs]
-        self.DoFsMapped = self.DoFs.copy()
-        self.DoFsMapped[:,1] = self.boundary.mapping(self.DoFs, 0)
+        self.nNodes = self.boundary.nNodes
+        self.nodesMapped = self.nodes.copy()
+        self.nodesMapped[:,1] = self.boundary.mapping(self.nodes, 0)
         self.selectKernel(kernel)
         self.selectBasis(basis)
 
@@ -318,8 +324,9 @@ class FciMlsSim:
         # --------------------------------------
         #     compute the moment matrix A(x)
         # --------------------------------------
-        indices, w, displacements = self.boundary.w(point)
-        p = self.basis(point - displacements*self.boundary.support)
+        indices, w = self.boundary.w(point)
+        displacements = self.boundary.computeDisplacements(point, indices)
+        p = self.basis(point - displacements)
         A = w*p.T@p
         # --------------------------------------
         #      compute vector c(x) and phi
@@ -390,9 +397,12 @@ class FciMlsSim:
         # --------------------------------------
         #     compute the moment matrix A(x)
         # --------------------------------------
-        indices, w, gradw, displacements = self.boundary.dw(point)
-        p = self.basis(point - displacements*self.boundary.support)
+        indices, w, gradw = self.boundary.dw(point)
+        displacements = self.boundary.computeDisplacements(point, indices)
+        p = self.basis(point - displacements)
         A = w*p.T@p
+        # re-align gradient to global x-coordinate
+        gradw[:,0] -= self.mapping.deriv(point)*gradw[:,1]
         dA = [gradw[:,i]*p.T@p for i in range(self.ndim)]
         # --------------------------------------
         #         compute matrix c
@@ -415,9 +425,6 @@ class FciMlsSim:
         cp = c[0] @ p.T
         phis = cp * w
         gradphis = ( c[1 : self.ndim + 1]@p.T*w + cp*gradw.T).T
-        # re-align gradient to global x-coordinate
-        dQ = self.mapping.deriv(point)
-        gradphis[:,0] = gradphis[:,0] - dQ*gradphis[:,1]
         return indices, phis, gradphis
 
     def d2phi(self, point):
@@ -441,12 +448,16 @@ class FciMlsSim:
 
         """
         raise NotImplementedError
+        # TODO: re-align grad2w to global x-coordinate
         # --------------------------------------
         #     compute the moment matrix A(x)
         # --------------------------------------
-        indices, w, gradw, grad2w, displacements = self.boundary.d2w(point)
-        p = self.basis(point - displacements*self.boundary.support)
+        indices, w, gradw, grad2w = self.boundary.d2w(point)
+        displacements = self.boundary.computeDisplacements(point, indices)
+        p = self.basis(point - displacements)
         A = w*p.T@p
+        # re-align gradient to global x-coordinate
+        gradw[:,0] -= self.mapping.deriv(point)*gradw[:,1]
         dA = [gradw[:,i]*p.T@p for i in range(self.ndim)]
         d2A = [grad2w[:,i]*p.T@p for i in range(self.ndim)]
         # --------------------------------------
@@ -476,7 +487,6 @@ class FciMlsSim:
         grad2phis = ( c[self.ndim + 1 : 2*self.ndim + 1]@p.T*w +
                       2.0*c[1 : self.ndim + 1]@p.T*gradw.T +
                       cp*grad2w.T ).T
-        # TODO: re-align gradient to global x-coordinate
         return indices, phis, grad2phis
 
     def setInitialConditions(self, u0, mapped=True):
@@ -486,9 +496,9 @@ class FciMlsSim:
         ----------
         u0 : {numpy.ndarray, callable}
             Initial conditions for the simulation.
-            Must be an array of shape (self.nDoFs,) or a callable object
+            Must be an array of shape (self.nNodes,) or a callable object
             returning such an array and taking as input the array of node
-            coordinates with shape (self.nDoFs, self.ndim).
+            coordinates with shape (self.nNodes, self.ndim).
         mapped : bool, optional
             Whether mapping is applied to node positions before applying ICs.
             The default is True.
@@ -498,33 +508,33 @@ class FciMlsSim:
         None.
 
         """
-        nDoFs = self.nDoFs
+        nNodes = self.nNodes
         self.uTime = 0.0
-        if isinstance(u0, np.ndarray) and u0.shape == (nDoFs,):
+        if isinstance(u0, np.ndarray) and u0.shape == (nNodes,):
             self.u0 = u0
             self.u = u0.copy()
             self.u0func = None
         elif callable(u0):
             self.u0func = u0
             if mapped:
-                self.u = u0(self.DoFsMapped)
+                self.u = u0(self.nodesMapped)
             else:
-                self.u = u0(self.DoFs)
+                self.u = u0(self.nodes)
             self.u0 = self.u.copy()
         else:
-            raise TypeError(f"u0 must be an array of shape ({nDoFs},) "
+            raise TypeError(f"u0 must be an array of shape ({nNodes},) "
                 f"or a callable object returning such an array and taking as "
                 f"input the array of node coordinates with shape "
-                f"({nDoFs}, {self.ndim}).")
+                f"({nNodes}, {self.ndim}).")
 
         # pre-allocate arrays for constructing matrix equation for uI
         # this is the maximum possibly required size; not all will be used
-        nMaxEntries = int(self.boundary.volume * self.NX * self.NY * nDoFs)
+        nMaxEntries = int(self.boundary.volume * self.NX * self.NY * nNodes)
         data = np.empty(nMaxEntries)
         indices = np.empty(nMaxEntries, dtype='uint32')
         indptr = np.empty(self.nNodes+1, dtype='uint32')
         index = 0
-        for iN, node in enumerate(self.DoFs):
+        for iN, node in enumerate(self.nodes):
             inds, phis = self.phi(node)
             nEntries = len(inds)
             data[index:index+nEntries] = phis
@@ -577,8 +587,9 @@ class FciMlsSim:
         None.
 
         """
-        if vci is None:
+        if vci in [0, None]:
             self.vci = None
+            vci = None
         elif vci in [1, 'linear', 'Linear', 'l', 'L']:
             self.vci = 'VC1 (assumed strain)'
             vci = 1
@@ -589,7 +600,7 @@ class FciMlsSim:
              raise ValueError('Unknown VCI order vci={vci}')
         self.vci_solver = None
         ndim = self.ndim
-        nDoFs = self.nDoFs
+        nNodes = self.nNodes
         NX = self.NX
         NY = self.NY
         if NQY is None:
@@ -602,15 +613,15 @@ class FciMlsSim:
         self.massLumping = massLumping
         # pre-allocate arrays for stiffness matrix triplets
         nQuads = NQX * NQY * Qord**2
-        nMaxEntries = int((nDoFs * self.boundary.volume)**2 * nQuads * NX)
+        nMaxEntries = int((nNodes * self.boundary.volume)**2 * nQuads * NX)
         Kdata = np.zeros(nMaxEntries)
         Adata = np.zeros(nMaxEntries)
         if not massLumping:
             Mdata = np.zeros(nMaxEntries)
         row_ind = np.zeros(nMaxEntries, dtype='int')
         col_ind = np.zeros(nMaxEntries, dtype='int')
-        self.b = np.zeros(nDoFs)
-        self.u_weights = np.zeros(nDoFs)
+        self.b = np.zeros(nNodes)
+        self.u_weights = np.zeros(nNodes)
 
         self.store = []
 
@@ -619,11 +630,11 @@ class FciMlsSim:
             self.rOld = np.zeros((self.nNodes, self.ndim, 3))
             self.rNew = np.zeros((self.nNodes, self.ndim, 3))
             xis = np.empty((self.nNodes, self.ndim, 3))
-        else:
-            self.gradphiSumsOld = np.zeros((self.nDoFs, self.ndim))
+        else: # if vci == 1 or None
+            self.gradphiSumsOld = np.zeros((self.nNodes, self.ndim))
             self.gradphiSumsNew = self.gradphiSumsOld
             if vci == 1:
-                areas = np.zeros(nDoFs)
+                areas = np.zeros(nNodes)
 
         ##### compute spatial discretizaton
         for iPlane in range(NX):
@@ -660,7 +671,7 @@ class FciMlsSim:
                     self.rOld[inds,1,2] -= phis * quadWeight
                     self.rOld[inds,:,1:] -= np.apply_along_axis(lambda x: np.outer(x[0:2],
                         x[2:4]), 1, np.hstack((gradphis, disps))) * quadWeight
-                else:
+                else: # if vci == 1 or None
                     self.store.append((inds, phis, gradphis, quadWeight))
                     self.gradphiSumsOld[inds] += gradphis * quadWeight
                     if vci == 1:
@@ -670,10 +681,10 @@ class FciMlsSim:
 
         if vci == 1:
             xis = -self.gradphiSumsOld / areas.reshape(-1,1)
-            self.gradphiSumsNew = np.zeros((nDoFs, 2))
+            self.gradphiSumsNew = np.zeros((nNodes, 2))
         elif vci == 2:
-            self.gradphiSumsOld = self.rOld[:nDoFs,:,0]
-            self.gradphiSumsNew = self.rNew[:nDoFs,:,0]
+            self.gradphiSumsOld = self.rOld[:nNodes,:,0]
+            self.gradphiSumsNew = self.rNew[:nNodes,:,0]
             for i, row in enumerate(A):
                 lu, piv = la.lu_factor(A[i], True, False)
                 for j in range(self.ndim):
@@ -690,7 +701,7 @@ class FciMlsSim:
                 self.rNew[inds,1,2] -= phis * quadWeight
                 self.rNew[inds,:,1:] -= np.apply_along_axis(lambda x: np.outer(x[0:2],
                     x[2:4]), 1, np.hstack((testgrads, disps))) * quadWeight
-            else:
+            else: # if vci == 1 or None
                 inds, phis, gradphis, quadWeight = items
                 if vci == 1:
                     testgrads = gradphis + xis[inds]
@@ -711,14 +722,14 @@ class FciMlsSim:
             index += nEntries
 
         self.K = sp.csr_matrix( (Kdata, (row_ind, col_ind)),
-                                shape=(nDoFs, nDoFs) )
+                                shape=(nNodes, nNodes) )
         self.A = sp.csr_matrix( (Adata, (row_ind, col_ind)),
-                                shape=(nDoFs, nDoFs) )
+                                shape=(nNodes, nNodes) )
         if massLumping:
             self.M = sp.diags(self.u_weights, format='csr')
         else:
             self.M = sp.csr_matrix( (Mdata, (row_ind, col_ind)),
-                                shape=(nDoFs, nDoFs) )
+                                shape=(nNodes, nNodes) )
 
     def computeSpatialDiscretizationConservativeLinearVCI(self, f=None, NQX=1,
             NQY=None, Qord=2, quadType='gauss', massLumping=False, **kwargs):
@@ -759,7 +770,7 @@ class FciMlsSim:
         """
         self.vci = 'VC1-C (whole domain)'
         ndim = self.ndim
-        nDoFs = self.nDoFs
+        nNodes = self.nNodes
         nNodes = self.nNodes
         NX = self.NX
         NY = self.NY
@@ -773,19 +784,19 @@ class FciMlsSim:
         self.massLumping = massLumping
         # pre-allocate arrays for stiffness matrix triplets
         nQuads = NQX * NQY * Qord**2
-        nMaxEntries = int((nDoFs * self.boundary.volume)**2 * nQuads * NX)
+        nMaxEntries = int((nNodes * self.boundary.volume)**2 * nQuads * NX)
         Kdata = np.zeros(nMaxEntries)
         Adata = np.zeros(nMaxEntries)
         if not massLumping:
             Mdata = np.zeros(nMaxEntries)
         row_ind = np.zeros(nMaxEntries, dtype='int')
         col_ind = np.zeros(nMaxEntries, dtype='int')
-        self.b = np.zeros(nDoFs)
+        self.b = np.zeros(nNodes)
         self.u_weights = np.zeros(nNodes)
 
         self.store = []
 
-        nMaxEntries = int(((nDoFs * self.boundary.volume)*2 + 1) * nQuads * NX)
+        nMaxEntries = int(((nNodes * self.boundary.volume)*2 + 1) * nQuads * NX)
         gd = np.empty(nMaxEntries)
         ri = np.empty(nMaxEntries, dtype='int')
         ci = np.empty(nMaxEntries, dtype='int')
@@ -831,17 +842,17 @@ class FciMlsSim:
                 nEntries = 2*len(inds)
                 gd[index:index+nEntries] = gradphis.ravel()
                 ri[index:index+nEntries:2] = inds
-                ri[index+1:index+nEntries:2] = inds + nDoFs
+                ri[index+1:index+nEntries:2] = inds + nNodes
                 ci[index:index+nEntries] = iQ + iPlane*nQuads
                 index += nEntries
 
         gd[index:index + nQuads*NX] = 1.0
-        ri[index:index + nQuads*NX] = 2*nDoFs
+        ri[index:index + nQuads*NX] = 2*nNodes
         ci[index:index + nQuads*NX] = np.arange(nQuads * NX)
         index += nQuads * NX
 
-        self.gradphiSums = self.rOld[:nDoFs,:,0]
-        nConstraints = 2*nDoFs + 1
+        self.gradphiSumsOld = self.rOld[:nNodes,:,0]
+        nConstraints = 2*nNodes + 1
 
         ##### Using SuiteSparse min2norm (QR based solver) #####
         G = sp.csc_matrix((gd[:index], (ri[:index], ci[:index])),
@@ -850,7 +861,7 @@ class FciMlsSim:
         del gd, ci, ri, offsets, weights, quads, quadWeights
         from timeit import default_timer
         start_time = default_timer()
-        rhs = np.append(self.gradphiSums.T.ravel(), 0.)
+        rhs = np.append(self.gradphiSumsOld.T.ravel(), 0.)
         self.xi = (ssqr.min2norm(G, rhs).ravel(), 0)
         print(f'xi solve time = {default_timer()-start_time} s')
         self.vci_solver = 'ssqr.min2norm'
@@ -858,7 +869,7 @@ class FciMlsSim:
         # ##### Using scipy.sparse.linalg, much slower, but uses less memory #####
         # self.G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),
         #                         shape=(nConstraints, nQuads * NX))
-        # rhs = np.append(self.gradphiSums.T.ravel(), 0.)
+        # rhs = np.append(self.gradphiSumsOld.T.ravel(), 0.)
         # v0 = np.zeros(nQuads * NX)
         # maxit = nQuads * NX
         # # tol = np.finfo(float).eps
@@ -893,17 +904,17 @@ class FciMlsSim:
             col_ind[index:index+nEntries] = np.tile(inds, len(inds))
             index += nEntries
 
-        self.gradphiSumsNew = self.rNew[:nDoFs,:,0]
+        self.gradphiSumsNew = self.rNew[:nNodes,:,0]
 
         self.K = sp.csr_matrix( (Kdata, (row_ind, col_ind)),
-                                shape=(nDoFs, nDoFs) )
+                                shape=(nNodes, nNodes) )
         self.A = sp.csr_matrix( (Adata, (row_ind, col_ind)),
-                                shape=(nDoFs, nDoFs) )
+                                shape=(nNodes, nNodes) )
         if massLumping:
             self.M = sp.diags(self.u_weights, format='csr')
         else:
             self.M = sp.csr_matrix( (Mdata, (row_ind, col_ind)),
-                                shape=(nDoFs, nDoFs) )
+                                shape=(nNodes, nNodes) )
 
     def initializeTimeIntegrator(self, integrator, dt, P='ilu', **kwargs):
         """Initialize and register the time integration scheme to be used.
@@ -1046,6 +1057,6 @@ class FciMlsSim:
         None.
 
         """
-        self.uPlot[0:self.nDoFs] = self.uI
+        self.uPlot[0:self.nNodes] = self.uI
         for i, x in enumerate(self.X):
             self.U[i] = np.sum(self.phiPlot[i] * self.uPlot[self.indPlot[i]])
