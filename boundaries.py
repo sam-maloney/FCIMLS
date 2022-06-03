@@ -149,7 +149,10 @@ class PeriodicBoundary(Boundary):
         return R, b
 
     def computeBoundaryIntegrals(self, vci):
-        return 0
+        if vci == 1:
+            return np.zeros((self.nNodes, self.sim.ndim))
+        elif vci == 2:
+            return np.zeros((self.nNodes, self.sim.ndim, 3))
 
 
 class DirichletBoundary(Boundary):
@@ -265,19 +268,60 @@ class DirichletBoundary(Boundary):
         return modR, modb
 
     def computeBoundaryIntegrals(self, vci):
-        # TODO: finish this
+        ndim = self.sim.ndim
+        quadType = self.sim.quadType
+        Qord = self.sim.Qord
+        NQX = self.sim.NQX
+        NQY = self.sim.NQY
+        xmax = self.sim.xmax
+        ymax = self.sim.ymax
         if vci == 1:
-            integrals = np.zeros((self.nNodes, self.sim.ndim))
-        elif vci == 1:
-            integrals = np.zeros((self.nNodes, self.sim.ndim, 3))
-        ##### generate quadrature points
+            integrals = np.zeros((self.nNodes, ndim))
+            phiSums = integrals
+        elif vci == 2:
+            integrals = np.zeros((self.nNodes, ndim, 3))
+            phiSums = integrals[:,:,0]
         if quadType.lower() in ('gauss', 'g', 'gaussian'):
-            offsets_base, weights_base = roots_legendre(Qord)
+            offsets, weights = roots_legendre(Qord)
         elif quadType.lower() in ('uniform', 'u'):
-            offsets_base = np.linspace(1/Qord - 1, 1 - 1/Qord, Qord)
-            weights_base = np.repeat(2/Qord, Qord)
-        offsets = (offsets_base * dx * 0.5 / NQX, offsets_base * 0.5 / NQY)
-        weights = (weights_base * dx * 0.5 / NQX, weights_base * 0.5 / NQY)
+            offsets = np.arange(1/Qord - 1, 1, 2/Qord)
+            weights = np.full(Qord, 2/Qord)
+        # Left/Right boundaries
+        yfac = 0.5 * ymax / NQY
+        quads = np.arange(yfac, ymax, 2*yfac)
+        quadWeights = np.tile(yfac * weights, len(quads))
+        quads = (np.repeat(quads, Qord).reshape(-1,Qord) + yfac*offsets).ravel()
+        for iQ, quad in enumerate(quads):
+            quadWeight = quadWeights[iQ]
+            inds, phis = self.sim.phi(np.array((0, quad)))
+            phiSums[inds,0] -= phis * quadWeight
+            if vci == 2:
+                disps = self.computeDisplacements(np.array((0, quad)), inds)
+                integrals[inds,0,1:] -= phis[:,np.newaxis] * disps * quadWeight
+            inds, phis = self.sim.phi(np.array((xmax, quad)))
+            phiSums[inds,0] += phis * quadWeight
+            if vci == 2:
+                disps = self.computeDisplacements(np.array((xmax, quad)), inds)
+                integrals[inds,0,1:] += phis[:,np.newaxis] * disps * quadWeight
+        # Top/Bottom boundaries
+        xfac = 0.5 / NQX
+        for iPlane in range(self.sim.NX):
+            dx = self.sim.dx[iPlane]
+            quads = dx*(0.5 + xfac*offsets) + self.sim.nodeX[iPlane]
+            quadWeights = dx * xfac * weights
+            for iQ, quad in enumerate(quads):
+                quadWeight = quadWeights[iQ]
+                inds, phis = self.sim.phi(np.array((quad, 0)))
+                phiSums[inds,1] -= phis * quadWeight
+                if vci == 2:
+                    disps = self.computeDisplacements(np.array((quad, 0)), inds)
+                    integrals[inds,1,1:] -= phis[:,np.newaxis] * disps * quadWeight
+                inds, phis = self.sim.phi(np.array((quad, ymax)))
+                phiSums[inds,1] += phis * quadWeight
+                if vci == 2:
+                    disps = self.computeDisplacements(np.array((quad, ymax)), inds)
+                    integrals[inds,1,1:] += phis[:,np.newaxis] * disps * quadWeight
+        return integrals
 
 
 # class DirichletXPeriodicYBoundary(Boundary):

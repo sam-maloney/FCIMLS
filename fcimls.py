@@ -627,14 +627,17 @@ class FciMlsSim:
 
         if vci == 2:
             A = np.zeros((self.nNodes, 3, 3))
-            self.rOld = np.zeros((self.nNodes, self.ndim, 3))
-            self.rNew = np.zeros((self.nNodes, self.ndim, 3))
+            self.rOld = self.boundary.computeBoundaryIntegrals(vci)
+            self.rNew = self.rOld.copy()
+            self.gradphiSumsOld = self.rOld[:,:,0]
+            self.gradphiSumsNew = self.rNew[:,:,0]
             xis = np.empty((self.nNodes, self.ndim, 3))
         else: # if vci == 1 or None
-            self.gradphiSumsOld = np.zeros((self.nNodes, self.ndim))
+            self.gradphiSumsOld = self.boundary.computeBoundaryIntegrals(vci=1)
             self.gradphiSumsNew = self.gradphiSumsOld
             if vci == 1:
                 areas = np.zeros(nNodes)
+                self.gradphiSumsNew = self.gradphiSumsOld.copy()
 
         ##### compute spatial discretizaton
         for iPlane in range(NX):
@@ -643,13 +646,13 @@ class FciMlsSim:
             if quadType.lower() in ('gauss', 'g', 'gaussian'):
                 offsets, weights = roots_legendre(Qord)
             elif quadType.lower() in ('uniform', 'u'):
-                offsets = np.linspace(1/Qord - 1, 1 - 1/Qord, Qord)
-                weights = np.repeat(2/Qord, Qord)
+                offsets = np.arange(1/Qord - 1, 1, 2/Qord)
+                weights = np.full(Qord, 2/Qord)
             offsets = (offsets * dx * 0.5 / NQX, offsets * 0.5 / NQY)
             weights = (weights * dx * 0.5 / NQX, weights * 0.5 / NQY)
             quads = ( np.indices([NQX, NQY], dtype='float').T.
                       reshape(-1, ndim) + 0.5 ) * [dx/NQX, 1/NQY]
-            quadWeights = np.repeat(1., len(quads))
+            quadWeights = np.ones(len(quads))
             for i in range(ndim):
                 quads = np.concatenate(
                     [quads + offset*np.eye(ndim)[i] for offset in offsets[i]] )
@@ -660,31 +663,27 @@ class FciMlsSim:
             for iQ, quad in enumerate(quads):
                 inds, phis, gradphis = self.dphi(quad)
                 quadWeight = quadWeights[iQ]
+                self.gradphiSumsOld[inds] -= gradphis * quadWeight
                 if vci == 2:
                     disps = self.boundary.computeDisplacements(quad, inds)
                     self.store.append((inds, phis, gradphis, quadWeight, disps))
                     P = np.hstack((np.ones((len(inds), 1)), disps))
                     A[inds] += quadWeight * \
                         np.apply_along_axis(lambda x: np.outer(x,x), 1, P)
-                    self.rOld[inds,:,0] -= gradphis * quadWeight
                     self.rOld[inds,0,1] -= phis * quadWeight
                     self.rOld[inds,1,2] -= phis * quadWeight
                     self.rOld[inds,:,1:] -= np.apply_along_axis(lambda x: np.outer(x[0:2],
                         x[2:4]), 1, np.hstack((gradphis, disps))) * quadWeight
                 else: # if vci == 1 or None
                     self.store.append((inds, phis, gradphis, quadWeight))
-                    self.gradphiSumsOld[inds] += gradphis * quadWeight
                     if vci == 1:
                         areas[inds] += quadWeight
                 if f is not None:
                     self.b[inds] += quadWeight * f(quad) * phis
 
         if vci == 1:
-            xis = -self.gradphiSumsOld / areas.reshape(-1,1)
-            self.gradphiSumsNew = np.zeros((nNodes, 2))
+            xis = self.gradphiSumsOld / areas.reshape(-1,1)
         elif vci == 2:
-            self.gradphiSumsOld = self.rOld[:nNodes,:,0]
-            self.gradphiSumsNew = self.rNew[:nNodes,:,0]
             for i, row in enumerate(A):
                 lu, piv = la.lu_factor(A[i], True, False)
                 for j in range(self.ndim):
@@ -696,7 +695,6 @@ class FciMlsSim:
                 inds, phis, gradphis, quadWeight, disps = items
                 testgrads = ( gradphis + xis[inds,:,0] +
                     xis[inds,:,1]*disps[:,0:1] + xis[inds,:,2]*disps[:,1:2] )
-                self.rNew[inds,:,0] -= testgrads * quadWeight
                 self.rNew[inds,0,1] -= phis * quadWeight
                 self.rNew[inds,1,2] -= phis * quadWeight
                 self.rNew[inds,:,1:] -= np.apply_along_axis(lambda x: np.outer(x[0:2],
@@ -705,9 +703,9 @@ class FciMlsSim:
                 inds, phis, gradphis, quadWeight = items
                 if vci == 1:
                     testgrads = gradphis + xis[inds]
-                    self.gradphiSumsNew[inds] += testgrads * quadWeight
                 else:
                     testgrads = gradphis
+            self.gradphiSumsNew[inds] -= testgrads * quadWeight
             self.u_weights[inds] += quadWeight * phis
             nEntries = len(inds)**2
             Kdata[index:index+nEntries] = quadWeight * \
@@ -731,8 +729,9 @@ class FciMlsSim:
             self.M = sp.csr_matrix( (Mdata, (row_ind, col_ind)),
                                 shape=(nNodes, nNodes) )
 
-    def computeSpatialDiscretizationConservativeLinearVCI(self, f=None, NQX=1,
-            NQY=None, Qord=2, quadType='gauss', massLumping=False, **kwargs):
+    def computeSpatialDiscretizationConservativeVCI(self, f=None, NQX=1,
+            NQY=None, Qord=2, quadType='gauss', massLumping=False,
+            vci='linear', **kwargs):
         """Assemble the system discretization matrices K, A, M in CSR format.
         Implements linear variationally consistent integration by re-weighting
         the quadrature points.
@@ -762,13 +761,24 @@ class FciMlsSim:
         massLumping : bool, optional
             Determines whether mass-lumping is used to calculate M matrix.
             The default is False.
+        vci : {int, string}, optional
+            Order of VCI correction to apply. If int must be 1 or 2, if string
+            must be in ['linear', 'quadratic']. The Default is 'linear'.
 
         Returns
         -------
         None.
 
         """
-        self.vci = 'VC1-C (whole domain)'
+        if vci in [1, 'linear', 'Linear', 'l', 'L']:
+            self.vci = 'VC1-C (whole domain)'
+            vci = 1
+        elif vci in [2, 'quadratic', 'Quadratic', 'q', 'Q']:
+# TODO: implement quadratic correction, currently just placeholder
+            self.vci = 'VC2-C (whole domain)'
+            vci = 2
+        else:
+             raise ValueError('Unknown VCI order vci={vci}')
         ndim = self.ndim
         nNodes = self.nNodes
         nNodes = self.nNodes
@@ -801,7 +811,14 @@ class FciMlsSim:
         ri = np.empty(nMaxEntries, dtype='int')
         ci = np.empty(nMaxEntries, dtype='int')
 
-        self.rOld = np.zeros((nNodes, self.ndim, 3))
+        if vci == 1:
+            self.gradphiSumsOld = self.boundary.computeBoundaryIntegrals(vci)
+            self.gradphiSumsNew = self.gradphiSumsOld.copy()
+        if vci == 2:
+            self.rOld = self.boundary.computeBoundaryIntegrals(vci)
+            self.rNew = self.rOld.copy()
+            self.gradphiSumsOld = self.rOld[:,:,0]
+            self.gradphiSumsNew = self.rNew[:,:,0]
 
         ##### compute spatial discretizaton
         index = 0
@@ -811,13 +828,13 @@ class FciMlsSim:
             if quadType.lower() in ('gauss', 'g', 'gaussian'):
                 offsets, weights = roots_legendre(Qord)
             elif quadType.lower() in ('uniform', 'u'):
-                offsets = np.linspace(1/Qord - 1, 1 - 1/Qord, Qord)
-                weights = np.repeat(2/Qord, Qord)
+                offsets = np.arange(1/Qord - 1, 1, 2/Qord)
+                weights = np.full(Qord, 2/Qord)
             offsets = (offsets * dx * 0.5 / NQX, offsets * 0.5 / NQY)
             weights = (weights * dx * 0.5 / NQX, weights * 0.5 / NQY)
             quads = ( np.indices([NQX, NQY], dtype='float').T.
                       reshape(-1, ndim) + 0.5 ) * [dx/NQX, 1/NQY]
-            quadWeights = np.repeat(1., len(quads))
+            quadWeights = np.ones(len(quads))
             for i in range(ndim):
                 quads = np.concatenate(
                     [quads + offset*np.eye(ndim)[i] for offset in offsets[i]] )
@@ -829,14 +846,17 @@ class FciMlsSim:
             for iQ, quad in enumerate(quads):
                 inds, phis, gradphis = self.dphi(quad)
                 quadWeight = quadWeights[iQ]
-                disps = self.boundary.computeDisplacements(quad, inds)
-                rNews = np.apply_along_axis(lambda x: np.outer(x[0:2],
-                    x[2:4]), 1, np.hstack((gradphis, disps)))
-                self.store.append((inds, phis, gradphis, quadWeight, rNews))
-                self.rOld[inds,:,0] -= gradphis * quadWeight
-                self.rOld[inds,0,1] -= phis * quadWeight
-                self.rOld[inds,1,2] -= phis * quadWeight
-                self.rOld[inds,:,1:3] -= rNews * quadWeight
+                self.gradphiSumsOld[inds] -= gradphis * quadWeight
+                if vci == 1:
+                    self.store.append((inds, phis, gradphis, quadWeight))
+                if vci == 2:
+                    disps = self.boundary.computeDisplacements(quad, inds)
+                    rDisps = np.apply_along_axis(lambda x: np.outer(x[0:2],
+                        x[2:4]), 1, np.hstack((gradphis, disps)))
+                    self.rOld[inds,0,1] -= phis * quadWeight
+                    self.rOld[inds,1,2] -= phis * quadWeight
+                    self.rOld[inds,:,1:3] -= rDisps * quadWeight
+                    self.store.append((inds, phis, gradphis, quadWeight, rDisps))
                 if f is not None:
                     self.b[inds] += f(quad) * phis * quadWeight
                 nEntries = 2*len(inds)
@@ -851,7 +871,6 @@ class FciMlsSim:
         ci[index:index + nQuads*NX] = np.arange(nQuads * NX)
         index += nQuads * NX
 
-        self.gradphiSumsOld = self.rOld[:nNodes,:,0]
         nConstraints = 2*nNodes + 1
 
         ##### Using SuiteSparse min2norm (QR based solver) #####
@@ -881,16 +900,18 @@ class FciMlsSim:
         # print(f'xi solve time = {default_timer()-start_time} s')
         # self.vci_solver = 'scipy.sparse.linalg.lsqr'
 
-        self.rNew = np.zeros((nNodes, self.ndim, 3))
-
         index = 0
-        for iQ, (inds, phis, gradphis, quadWeight, rNews) in enumerate(self.store):
-            quadWeight += self.xi[0][iQ]
-            disps = quad - self.nodes[inds]
-            self.rNew[inds,:,0] -= gradphis * quadWeight
-            self.rNew[inds,0,1] -= phis * quadWeight
-            self.rNew[inds,1,2] -= phis * quadWeight
-            self.rNew[inds,:,1:3] -= rNews * quadWeight
+        for iQ, items in enumerate(self.store):
+            if vci == 1:
+                inds, phis, gradphis, quadWeight = items
+                quadWeight += self.xi[0][iQ]
+            if vci == 2:
+                inds, phis, gradphis, quadWeight, rDisps = items
+                quadWeight += self.xi[0][iQ]
+                self.rNew[inds,0,1] -= phis * quadWeight
+                self.rNew[inds,1,2] -= phis * quadWeight
+                self.rNew[inds,:,1:3] -= rDisps * quadWeight
+            self.gradphiSumsNew[inds] -= gradphis * quadWeight
             self.u_weights[inds] += quadWeight * phis
             nEntries = len(inds)**2
             Kdata[index:index+nEntries] = quadWeight * \
@@ -903,8 +924,6 @@ class FciMlsSim:
             row_ind[index:index+nEntries] = np.repeat(inds, len(inds))
             col_ind[index:index+nEntries] = np.tile(inds, len(inds))
             index += nEntries
-
-        self.gradphiSumsNew = self.rNew[:nNodes,:,0]
 
         self.K = sp.csr_matrix( (Kdata, (row_ind, col_ind)),
                                 shape=(nNodes, nNodes) )

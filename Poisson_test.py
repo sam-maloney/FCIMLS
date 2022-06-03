@@ -160,27 +160,27 @@ class quadraticPatch:
         y = p.reshape(-1,2)[:,1]
         return 0.5 + 0.1*x + 0.8*y + 1.2*x*y + self.xx*x*x + self.yy*y*y
 
-f = QuadraticTestProblem()
+# f = QuadraticTestProblem()
 # f = slantedTestProblem()
 # f = simplifiedSlantProblem()
-# f = sinXsinY()
+f = sinXsinY()
 # f = linearPatch()
 # f = quadraticPatch()
 
 # mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
-mapping = fcimls.mappings.QuadraticMapping(f.a, f.b)
+# mapping = fcimls.mappings.QuadraticMapping(f.a, f.b)
 # mapping = fcimls.mappings.LinearMapping(1/f.xmax)
-# mapping = fcimls.mappings.StraightMapping()
+mapping = fcimls.mappings.StraightMapping()
 
 perturbation = 0.1
 kwargs={
     'mapping' : mapping,
-    # 'boundary' : ('Dirichlet', (1.5, f.solution, None)),
-    # # 'boundary' : ('periodic', 1.5),
-    # 'basis' : 'linear',
-    'boundary' : ('Dirichlet', (2.5, f.solution, None)),
-    # 'boundary' : ('periodic', 2.5),
-    'basis' : 'quadratic',
+    'boundary' : ('Dirichlet', (1.5, f.solution, None)),
+    # 'boundary' : ('periodic', 1.5),
+    'basis' : 'linear',
+    # 'boundary' : ('Dirichlet', (2.5, f.solution, None)),
+    # # 'boundary' : ('periodic', 2.5),
+    # 'basis' : 'quadratic',
     'kernel' : 'cubic',
     'velocity' : np.array([0., 0.]),
     'diffusivity' : 1., # Makes diffusivity matrix K into Poisson operator
@@ -220,7 +220,7 @@ for iN, NX in enumerate(NX_array):
 
     # allocate arrays and compute grid
     sim = fcimls.FciMlsSim(NX, NY, **kwargs)
-    # sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationConservativeLinearVCI
+    # sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationConservativeVCI
 
     sim.setInitialConditions(f)
 
