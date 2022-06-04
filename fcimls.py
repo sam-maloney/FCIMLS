@@ -612,8 +612,9 @@ class FciMlsSim:
         self.quadType = quadType
         self.massLumping = massLumping
         # pre-allocate arrays for stiffness matrix triplets
-        nQuads = NQX * NQY * Qord**2
-        nMaxEntries = int((nNodes * self.boundary.volume)**2 * nQuads * NX)
+        nQuads = NX * NQX * NQY * Qord**2
+        self.nQuads = nQuads
+        nMaxEntries = int((nNodes * self.boundary.volume)**2 * nQuads)
         Kdata = np.zeros(nMaxEntries)
         Adata = np.zeros(nMaxEntries)
         if not massLumping:
@@ -774,7 +775,6 @@ class FciMlsSim:
             self.vci = 'VC1-C (whole domain)'
             vci = 1
         elif vci in [2, 'quadratic', 'Quadratic', 'q', 'Q']:
-# TODO: implement quadratic correction, currently just placeholder
             self.vci = 'VC2-C (whole domain)'
             vci = 2
         else:
@@ -793,8 +793,10 @@ class FciMlsSim:
         self.quadType = quadType
         self.massLumping = massLumping
         # pre-allocate arrays for stiffness matrix triplets
-        nQuads = NQX * NQY * Qord**2
-        nMaxEntries = int((nNodes * self.boundary.volume)**2 * nQuads * NX)
+        nQuadsPerPlane = NQX * NQY * Qord**2
+        nQuads = nQuadsPerPlane * NX
+        self.nQuads = nQuads
+        nMaxEntries = int((nNodes * self.boundary.volume)**2 * nQuads)
         Kdata = np.zeros(nMaxEntries)
         Adata = np.zeros(nMaxEntries)
         if not massLumping:
@@ -806,16 +808,22 @@ class FciMlsSim:
 
         self.store = []
 
-        nMaxEntries = int(((nNodes * self.boundary.volume)*2 + 1) * nQuads * NX)
+        if vci == 1:
+            nConstraintsPerNode = 2
+        elif vci == 2:
+            nConstraintsPerNode = 6
+        nConstraints = nConstraintsPerNode * nNodes
+        nMaxEntries = int(nQuads * (nConstraints * self.boundary.volume + 1))
         gd = np.empty(nMaxEntries)
         ri = np.empty(nMaxEntries, dtype='int')
         ci = np.empty(nMaxEntries, dtype='int')
 
+        boundaryIntegrals = self.boundary.computeBoundaryIntegrals(vci)
         if vci == 1:
-            self.gradphiSumsOld = self.boundary.computeBoundaryIntegrals(vci)
+            self.gradphiSumsOld = boundaryIntegrals.copy()
             self.gradphiSumsNew = self.gradphiSumsOld.copy()
-        if vci == 2:
-            self.rOld = self.boundary.computeBoundaryIntegrals(vci)
+        elif vci == 2:
+            self.rOld = boundaryIntegrals.copy()
             self.rNew = self.rOld.copy()
             self.gradphiSumsOld = self.rOld[:,:,0]
             self.gradphiSumsNew = self.rNew[:,:,0]
@@ -845,74 +853,80 @@ class FciMlsSim:
 
             for iQ, quad in enumerate(quads):
                 inds, phis, gradphis = self.dphi(quad)
+
+                nInds = inds.size
+                nEntries = 2*nInds
+                gd[index:index+nEntries] = gradphis.T.ravel()
+                ri[index:index+nInds] = inds
+                ri[index+nInds:index+nEntries] = inds + nNodes
+                ci[index:index+nConstraintsPerNode*nInds] = iQ + iPlane*nQuadsPerPlane
+                index += nEntries
+
                 quadWeight = quadWeights[iQ]
                 self.gradphiSumsOld[inds] -= gradphis * quadWeight
                 if vci == 1:
-                    self.store.append((inds, phis, gradphis, quadWeight))
+                    self.store.append((quad, inds, phis, gradphis))
                 if vci == 2:
                     disps = self.boundary.computeDisplacements(quad, inds)
                     rDisps = np.apply_along_axis(lambda x: np.outer(x[0:2],
                         x[2:4]), 1, np.hstack((gradphis, disps)))
-                    self.rOld[inds,0,1] -= phis * quadWeight
-                    self.rOld[inds,1,2] -= phis * quadWeight
-                    self.rOld[inds,:,1:3] -= rDisps * quadWeight
-                    self.store.append((inds, phis, gradphis, quadWeight, rDisps))
-                if f is not None:
-                    self.b[inds] += f(quad) * phis * quadWeight
-                nEntries = 2*len(inds)
-                gd[index:index+nEntries] = gradphis.ravel()
-                ri[index:index+nEntries:2] = inds
-                ri[index+1:index+nEntries:2] = inds + nNodes
-                ci[index:index+nEntries] = iQ + iPlane*nQuads
-                index += nEntries
+                    rDisps[:,0,0] += phis
+                    rDisps[:,1,1] += phis
+                    self.rOld[inds,:,1:] -= rDisps * quadWeight
+                    self.store.append((quad, inds, phis, gradphis, rDisps))
+                    nEntries = 4*nInds
+                    gd[index:index+nEntries] = rDisps.T.ravel()
+                    ri[index:index+nInds] = inds + 2*nNodes
+                    ri[index+nInds:index+2*nInds] = inds + 3*nNodes
+                    ri[index+2*nInds:index+3*nInds] = inds + 4*nNodes
+                    ri[index+3*nInds:index+nEntries] = inds + 5*nNodes
+                    index += nEntries
 
-        gd[index:index + nQuads*NX] = 1.0
-        ri[index:index + nQuads*NX] = 2*nNodes
-        ci[index:index + nQuads*NX] = np.arange(nQuads * NX)
-        index += nQuads * NX
-
-        nConstraints = 2*nNodes + 1
+        # Add final constraint that sum of weights equal domain area
+        nConstraints += 1
+        self.nConstraints = nConstraints
+        gd[index:index + nQuads] = 1.0
+        ri[index:index + nQuads] = nConstraintsPerNode*nNodes
+        ci[index:index + nQuads] = np.arange(nQuads)
+        index += nQuads
 
         ##### Using SuiteSparse min2norm (QR based solver) #####
         G = sp.csc_matrix((gd[:index], (ri[:index], ci[:index])),
-                          shape=(np.iinfo('int32').max + 1, nQuads * NX))
-        G._shape = (nConstraints, nQuads * NX)
+                          shape=(np.iinfo('int32').max + 1, nQuads))
+        G._shape = (nConstraints, nQuads)
         del gd, ci, ri, offsets, weights, quads, quadWeights
         from timeit import default_timer
         start_time = default_timer()
-        rhs = np.append(self.gradphiSumsOld.T.ravel(), 0.)
-        self.xi = (ssqr.min2norm(G, rhs).ravel(), 0)
+        rhs = np.append(boundaryIntegrals.T.ravel(), self.xmax*self.ymax)
+        quadWeights = ssqr.min2norm(G, rhs).ravel()
         print(f'xi solve time = {default_timer()-start_time} s')
         self.vci_solver = 'ssqr.min2norm'
 
         # ##### Using scipy.sparse.linalg, much slower, but uses less memory #####
         # self.G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),
-        #                         shape=(nConstraints, nQuads * NX))
-        # rhs = np.append(self.gradphiSumsOld.T.ravel(), 0.)
-        # v0 = np.zeros(nQuads * NX)
-        # maxit = nQuads * NX
-        # # tol = np.finfo(float).eps
+        #                         shape=(nConstraints, nQuads))
+        # rhs = np.append(boundaryIntegrals.T.ravel(), self.xmax*self.ymax)
+        # maxit = 10*nQuads
         # tol = 1e-10
         # from timeit import default_timer
         # start_time = default_timer()
-        # # self.xi = sp_la.lsmr(self.G, rhs, x0=v0, atol=tol, btol=tol, maxiter=maxit)
-        # self.xi = sp_la.lsqr(self.G, rhs, x0=v0, atol=tol, btol=tol, iter_lim=maxit)
+        # # quadWeights = sp_la.lsmr(self.G, rhs, atol=tol, btol=tol, maxiter=maxit)[0]
+        # quadWeights = sp_la.lsqr(self.G, rhs, atol=tol, btol=tol, iter_lim=maxit)[0]
         # print(f'xi solve time = {default_timer()-start_time} s')
         # self.vci_solver = 'scipy.sparse.linalg.lsqr'
 
         index = 0
         for iQ, items in enumerate(self.store):
+            quadWeight = quadWeights[iQ]
             if vci == 1:
-                inds, phis, gradphis, quadWeight = items
-                quadWeight += self.xi[0][iQ]
+                quad, inds, phis, gradphis = items
             if vci == 2:
-                inds, phis, gradphis, quadWeight, rDisps = items
-                quadWeight += self.xi[0][iQ]
-                self.rNew[inds,0,1] -= phis * quadWeight
-                self.rNew[inds,1,2] -= phis * quadWeight
-                self.rNew[inds,:,1:3] -= rDisps * quadWeight
+                quad, inds, phis, gradphis, rDisps = items
+                self.rNew[inds,:,1:] -= rDisps * quadWeight
             self.gradphiSumsNew[inds] -= gradphis * quadWeight
             self.u_weights[inds] += quadWeight * phis
+            if f is not None:
+                self.b[inds] += f(quad) * phis * quadWeight
             nEntries = len(inds)**2
             Kdata[index:index+nEntries] = quadWeight * \
                 np.ravel( gradphis @ (self.diffusivity @ gradphis.T) )

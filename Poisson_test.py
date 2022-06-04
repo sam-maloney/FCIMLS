@@ -17,17 +17,13 @@ from timeit import default_timer
 class QuadraticTestProblem:
     xmax = 1.
     ymax = 1.
+    umax = xmax
     n = 3
     N = (2*np.pi/ymax)*n
     # a = 0.01
     b = 0.05
     # define a such that (0, 0) maps to (xmax, 1) for given b and xmax
     a = (1 - b*xmax)/xmax**2
-
-    umax = xmax
-    dudyMax = N*xmax
-    dudxMax = 1 + 2*a*N*xmax**2 + b*N*xmax
-    dudQMax = 1 # technically also reduced by slope of mapping
 
     def __call__(self, p):
         x = p.reshape(-1,2)[:,0]
@@ -47,16 +43,16 @@ class QuadraticTestProblem:
 class slantedTestProblem:
     xmax = 1.
     ymax = 1.
-    xfac = 2*np.pi/xmax
-    yfac = 2*np.pi/ymax
-
     n = 8
 
+    xfac = 2*np.pi/xmax
+    yfac = 2*np.pi/ymax
     n2 = n*n
     yf2 = yfac*yfac
     _2nyf2 = 2*n*yf2
     n2xf2pyf2 = n2*(xfac*xfac + yf2)
     n2xf2pyf2pyf2 = n2xf2pyf2 + yf2
+
     A = 0.5 / n2xf2pyf2
     B = 0.5 / (n2xf2pyf2pyf2 - _2nyf2*_2nyf2/n2xf2pyf2pyf2)
     C = B*_2nyf2 / n2xf2pyf2pyf2
@@ -65,13 +61,6 @@ class slantedTestProblem:
     aB = abs(B)
     aC = abs(C)
     umax = aA + aB + aC
-    dudxMax = umax*xfac*n
-    dudyMax = yfac*(aA*n + (aB+aC)*(1+n))
-    dudQMax = yfac*(aB+aC)/np.sqrt(2)
-
-    dfdxMax = xfac*n
-    dfdyMax = yfac*(n + 0.5)
-    dfdQMax = 0.5*yfac/np.sqrt(2)
 
     def __call__(self, p):
         x = p.reshape(-1,2)[:,0]
@@ -96,9 +85,6 @@ class simplifiedSlantProblem:
     xfac = 2*np.pi/xmax
     yfac = 2*np.pi/ymax
     umax = 1/(2*n*n*(yfac*yfac + xfac*xfac))
-    dudxMax = umax*xfac*n
-    dudyMax = umax*yfac*n
-    dudQMax = 0
 
     def __call__(self, p):
         x = p.reshape(-1,2)[:,0]
@@ -117,8 +103,6 @@ class sinXsinY:
     xfac = 2*np.pi/xmax
     yfac = 2*np.pi/ymax
     umax = (1 / (xfac**2 + yfac**2))
-    dudxMax = umax*xfac
-    dudyMax = umax*yfac
 
     def __call__(self, p):
         x = p.reshape(-1,2)[:,0]
@@ -163,8 +147,8 @@ class quadraticPatch:
 # f = QuadraticTestProblem()
 # f = slantedTestProblem()
 # f = simplifiedSlantProblem()
-f = sinXsinY()
-# f = linearPatch()
+# f = sinXsinY()
+f = linearPatch()
 # f = quadraticPatch()
 
 # mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
@@ -172,7 +156,7 @@ f = sinXsinY()
 # mapping = fcimls.mappings.LinearMapping(1/f.xmax)
 mapping = fcimls.mappings.StraightMapping()
 
-perturbation = 0.1
+perturbation = 0.
 kwargs={
     'mapping' : mapping,
     'boundary' : ('Dirichlet', (1.5, f.solution, None)),
@@ -216,24 +200,18 @@ for iN, NX in enumerate(NX_array):
     NQX = 1
     # NQX = max(NY//NX, 1)
     NQY = NY
-    Qord = 2
+    Qord = 3
 
-    # allocate arrays and compute grid
+    ##### allocate arrays and compute grid
     sim = fcimls.FciMlsSim(NX, NY, **kwargs)
-    # sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationConservativeVCI
-
-    sim.setInitialConditions(f)
 
     print(f'NX = {NX},\tNY = {NY},\tnNodes = {sim.nNodes}')
 
-    # Assemble the mass matrix and forcing term
+    ##### Assemble the mass matrix and forcing term
+    # sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationConservativeVCI
     sim.computeSpatialDiscretization(f, NQX=NQX, NQY=NQY, Qord=Qord, quadType='g',
-                                     massLumping=False, vci=2)
-
-    try:
-        dxi.append(sim.xi[1:])
-    except:
-        pass
+                                     massLumping=False, vci=0)
+    K, b = sim.boundary.modifyOperatorMatrix(sim.K, sim.b)
 
     if sim.boundary.name is 'periodic':
         ##### Enforce exact solution constraints directly #####
@@ -249,20 +227,18 @@ for iN, NX in enumerate(NX_array):
     print(f'setup time = {t_setup[iN]:.8e} s')
     start_time = default_timer()
 
-    # Solve for the approximate solution
-    # u = sp_la.spsolve(sim.K, sim.b)
-    tolerance = 1e-10
-    K, b = sim.boundary.modifyOperatorMatrix(sim.K, sim.b)
-    uI, info = sp_la.lgmres(K, b, tol=tolerance, atol=tolerance)
+    ##### Solve for the approximate solution
+    # tolerance = 1e-10
+    # uI, info = sp_la.lgmres(K, b, tol=tolerance, atol=tolerance)
+    uI = sp_la.spsolve(K, b)
     sim.uI = uI[:sim.nNodes]
-    # sim.uI, info = sp_la.lgmres(sim.K, sim.b, tol=tolerance, atol=tolerance)
     sim.solve()
 
     t_solve[iN] = default_timer()-start_time
     print(f'solve time = {t_solve[iN]:.8e} s')
     start_time = default_timer()
 
-    # compute the analytic solution and normalized error norms
+    ##### compute the analytic solution and normalized error norms
     uExact = f.solution(sim.nodes)
     E_inf[iN] = np.linalg.norm(sim.u - uExact, np.inf) / f.umax
     E_2[iN] = np.linalg.norm(sim.u - uExact)/np.sqrt(sim.nNodes) / f.umax
@@ -317,12 +293,12 @@ vmax = maxAbsErr
 
 ax1 = plt.subplot(121)
 ax1.set_title('Final Solution')
-# field = ax1.tripcolor(sim.X, sim.Y, error, shading='gouraud'
-#                        ,cmap='seismic', vmin=vmin, vmax=vmax)
+field = ax1.tripcolor(sim.X, sim.Y, error, shading='gouraud'
+                        ,cmap='seismic', vmin=vmin, vmax=vmax)
 # field = ax1.tripcolor(sim.nodes[:,0], sim.nodes[:,1], sim.u - uExact
 #                     ,shading='gouraud', cmap='seismic', vmin=vmin, vmax=vmax)
 # field = ax1.tripcolor(sim.nodes[:,0], sim.nodes[:,1], sim.u, shading='gouraud')
-field = ax1.tripcolor(sim.X, sim.Y, sim.U, shading='gouraud')
+# field = ax1.tripcolor(sim.X, sim.Y, sim.U, shading='gouraud')
 # field = ax1.tripcolor(sim.X, sim.Y, exactSol, shading='gouraud')
 # field = ax1.tripcolor(sim.X, sim.Y, f(np.vstack((sim.X,sim.Y)).T), shading='gouraud')
 x = np.linspace(0, sim.nodeX[-1], 100)

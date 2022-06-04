@@ -47,12 +47,12 @@ mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
 perturbation = 0.1
 kwargs={
     'mapping' : mapping,
-    # 'boundary' : ('Dirichlet', (1.5, f, None)),
-    # # 'boundary' : ('periodic', 1.5),
-    # 'basis' : 'linear',
-    'boundary' : ('Dirichlet', (2.5, f, None)),
-    # 'boundary' : ('periodic', 2.5),
-    'basis' : 'quadratic',
+    'boundary' : ('Dirichlet', (1.5, f, None)),
+    # 'boundary' : ('periodic', 1.5),
+    'basis' : 'linear',
+    # 'boundary' : ('Dirichlet', (2.5, f, None)),
+    # # 'boundary' : ('periodic', 2.5),
+    # 'basis' : 'quadratic',
     'kernel' : 'cubic',
     'velocity' : np.array([0., 0.]),
     'diffusivity' : 1., # Makes diffusivity matrix K into Poisson operator
@@ -64,7 +64,7 @@ kwargs={
 
 # allocate arrays for convergence testing
 start = 2
-stop = 6
+stop = 5
 nSamples = stop - start + 1
 NX_array = np.logspace(start, stop, num=nSamples, base=2, dtype='int32')
 E_inf = np.empty(nSamples, dtype='float64')
