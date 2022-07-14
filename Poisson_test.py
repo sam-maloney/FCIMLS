@@ -208,12 +208,24 @@ for iN, NX in enumerate(NX_array):
     print(f'NX = {NX},\tNY = {NY},\tnNodes = {sim.nNodes}')
 
     ##### Assemble the mass matrix and forcing term
-    # sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationConservativeVCI
+    sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationConservativeVCI
     sim.computeSpatialDiscretization(f, NQX=NQX, NQY=NQY, Qord=Qord, quadType='g',
-                                     massLumping=False, vci=0)
+                                     massLumping=False, vci=1)
     K, b = sim.boundary.modifyOperatorMatrix(sim.K, sim.b)
 
-    if sim.boundary.name is 'periodic':
+    # if sim.boundary.name == 'Dirichlet':
+    #     ##### Enforce exact solution constraints directly #####
+    #     # Sets all nodes on boundaries via strong-form co-location
+    #     for n, node in enumerate(sim.nodes):
+    #         if (node.prod() == 0) or (node[0] == f.xmax) or (node[1] == f.ymax):
+    #             inds, phis = sim.phi(node)
+    #             sim.K.data[sim.K.indptr[n]:sim.K.indptr[n+1]] = 0.
+    #             sim.K[n,inds] = phis
+    #             sim.b[n] = f.solution(sim.nodes[n])
+    # K = sim.K
+    # b = sim.b
+
+    if sim.boundary.name == 'periodic':
         ##### Enforce exact solution constraints directly #####
         # Sets all nodes on x and y axes via strong-form co-location
         for n, node in enumerate(sim.nodes):

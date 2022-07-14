@@ -635,10 +635,12 @@ class FciMlsSim:
             xis = np.empty((self.nNodes, self.ndim, 3))
         else: # if vci == 1 or None
             self.gradphiSumsOld = self.boundary.computeBoundaryIntegrals(vci=1)
-            self.gradphiSumsNew = self.gradphiSumsOld
-            if vci == 1:
-                areas = np.zeros(nNodes)
-                self.gradphiSumsNew = self.gradphiSumsOld.copy()
+            # self.gradphiSumsNew = self.gradphiSumsOld
+            # if vci == 1:
+            #     areas = np.zeros(nNodes)
+            #     self.gradphiSumsNew = self.gradphiSumsOld.copy()
+            areas = np.zeros(nNodes)
+            self.gradphiSumsNew = self.gradphiSumsOld.copy()
 
         ##### compute spatial discretizaton
         for iPlane in range(NX):
@@ -677,8 +679,9 @@ class FciMlsSim:
                         x[2:4]), 1, np.hstack((gradphis, disps))) * quadWeight
                 else: # if vci == 1 or None
                     self.store.append((inds, phis, gradphis, quadWeight))
-                    if vci == 1:
-                        areas[inds] += quadWeight
+                    # if vci == 1:
+                    #     areas[inds] += quadWeight
+                    areas[inds] += quadWeight
                 if f is not None:
                     self.b[inds] += quadWeight * f(quad) * phis
 
@@ -704,7 +707,7 @@ class FciMlsSim:
                 inds, phis, gradphis, quadWeight = items
                 if vci == 1:
                     testgrads = gradphis + xis[inds]
-                else:
+                else: # if vci == None
                     testgrads = gradphis
             self.gradphiSumsNew[inds] -= testgrads * quadWeight
             self.u_weights[inds] += quadWeight * phis
@@ -807,6 +810,7 @@ class FciMlsSim:
         self.u_weights = np.zeros(nNodes)
 
         self.store = []
+        quadWeightsList = []
 
         if vci == 1:
             nConstraintsPerNode = 2
@@ -881,6 +885,8 @@ class FciMlsSim:
                     ri[index+2*nInds:index+3*nInds] = inds + 4*nNodes
                     ri[index+3*nInds:index+nEntries] = inds + 5*nNodes
                     index += nEntries
+                
+                quadWeightsList.append(quadWeights)
 
         # Add final constraint that sum of weights equal domain area
         nConstraints += 1
@@ -894,13 +900,34 @@ class FciMlsSim:
         G = sp.csc_matrix((gd[:index], (ri[:index], ci[:index])),
                           shape=(np.iinfo('int32').max + 1, nQuads))
         G._shape = (nConstraints, nQuads)
-        del gd, ci, ri, offsets, weights, quads, quadWeights
+        del gd, ci, ri, offsets, weights, quads
         from timeit import default_timer
         start_time = default_timer()
+        # solve for quadWeights directly
         rhs = np.append(boundaryIntegrals.T.ravel(), self.xmax*self.ymax)
         quadWeights = ssqr.min2norm(G, rhs).ravel()
+        # # solve for corrections to quadWeights
+        # quadWeights = np.concatenate(quadWeightsList)
+        # rhs = np.append(boundaryIntegrals.T.ravel(), 0)
+        # quadWeightCcorrections = ssqr.min2norm(G, rhs).ravel()
+        # quadWeights += quadWeightCcorrections
         print(f'xi solve time = {default_timer()-start_time} s')
         self.vci_solver = 'ssqr.min2norm'
+        
+        # ##### Using sparse_dot_mkl (QR based solver) (not-working) #####
+        # import sparse_dot_mkl
+        # # G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),
+        # #                   shape=(nConstraints, np.iinfo('int32').max + 1))
+        # # G._shape = (nConstraints, nQuads)
+        # G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),
+        #                   shape=(nConstraints, nQuads))
+        # del gd, ci, ri, offsets, weights, quads, quadWeights
+        # from timeit import default_timer
+        # start_time = default_timer()
+        # rhs = np.append(boundaryIntegrals.T.ravel(), self.xmax*self.ymax)
+        # quadWeights = sparse_dot_mkl.sparse_qr_solve_mkl(G, rhs).ravel()
+        # print(f'xi solve time = {default_timer()-start_time} s')
+        # self.vci_solver = 'sparse_dot_mkl.sparse_qr_solve_mkl'
 
         # ##### Using scipy.sparse.linalg, much slower, but uses less memory #####
         # self.G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),

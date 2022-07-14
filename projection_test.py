@@ -37,8 +37,31 @@ class QuadraticTestProblem:
         y = p.reshape(-1,2)[:,1]
         return x*np.sin(2*np.pi*self.n*(y - self.a*x**2 - self.b*x))
 
+class linearPatch:
+    xmax = 1.
+    ymax = 1.
+    umax = 1.
+
+    def __call__(self, p):
+        x = p.reshape(-1,2)[:,0]
+        y = p.reshape(-1,2)[:,1]
+        return 1*x + 2*y
+
+
+class quadraticPatch:
+    xmax = 1.
+    ymax = 1.
+    umax = 1.
+
+    def __call__(self, p):
+        x = p.reshape(-1,2)[:,0]
+        y = p.reshape(-1,2)[:,1]
+        return 0.5 + 0.1*x + 0.8*y + 1.2*x*y + 0.8*x*x + 0.6*y*y
+
 # f = sinXsinY()
-f = QuadraticTestProblem()
+# f = QuadraticTestProblem()
+# f = linearPatch()
+f = quadraticPatch()
 
 mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
 # mapping = fcimls.mappings.LinearMapping(1/f.xmax)
@@ -47,12 +70,12 @@ mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
 perturbation = 0.1
 kwargs={
     'mapping' : mapping,
-    'boundary' : ('Dirichlet', (1.5, f, None)),
-    # 'boundary' : ('periodic', 1.5),
-    'basis' : 'linear',
-    # 'boundary' : ('Dirichlet', (2.5, f, None)),
-    # # 'boundary' : ('periodic', 2.5),
-    # 'basis' : 'quadratic',
+    # 'boundary' : ('Dirichlet', (1.5, f, None)),
+    # # 'boundary' : ('periodic', 1.5),
+    # 'basis' : 'linear',
+    'boundary' : ('Dirichlet', (2.5, f, None)),
+    # 'boundary' : ('periodic', 2.5),
+    'basis' : 'quadratic',
     'kernel' : 'cubic',
     'velocity' : np.array([0., 0.]),
     'diffusivity' : 1., # Makes diffusivity matrix K into Poisson operator
@@ -86,7 +109,7 @@ for iN, NX in enumerate(NX_array):
 
     # Assemble the mass matrix and forcing term
     sim.computeSpatialDiscretization(f, NQX=1, NQY=NY, Qord=2, quadType='g',
-                                     massLumping=False, vci=1)
+                                     massLumping=False, vci=0)
 
     sim.uI = sp_la.spsolve(sim.M, sim.b)
     sim.solve()

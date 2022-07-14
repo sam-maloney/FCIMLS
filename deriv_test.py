@@ -31,10 +31,12 @@ mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
 perturbation = 0.
 kwargs={
     'mapping' : mapping,
-    'boundary' : ('periodic', 1.01),
-    'basis' : 'linear',
+    # 'boundary' : ('Dirichlet', (1.5, f.solution, None)),
+    # # 'boundary' : ('periodic', 1.5),
+    # 'basis' : 'linear',
+    'boundary' : ('Dirichlet', (2.5, f.solution, None)),
     # 'boundary' : ('periodic', 2.5),
-    # 'basis' : 'quadratic',
+    'basis' : 'quadratic',
     'kernel' : 'cubic',
     'velocity' : np.array([0., 0.]),
     'diffusivity' : 1., # Makes diffusivity matrix K into Poisson operator
