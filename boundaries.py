@@ -149,10 +149,11 @@ class PeriodicBoundary(Boundary):
         return R, b
 
     def computeBoundaryIntegrals(self, vci):
+        e = np.array(())
         if vci == 1:
-            return np.zeros((self.nNodes, self.sim.ndim))
+            return np.zeros((self.nNodes, self.sim.ndim)), (e,e,e,e)
         elif vci == 2:
-            return np.zeros((self.nNodes, self.sim.ndim, 3))
+            return np.zeros((self.nNodes, self.sim.ndim, 3)), (e,e,e,e)
 
 
 class DirichletBoundary(Boundary):
@@ -269,17 +270,30 @@ class DirichletBoundary(Boundary):
 
     def computeBoundaryIntegrals(self, vci):
         ndim = self.sim.ndim
+        nNodes = self.nNodes
+        NX = self.sim.NX
         quadType = self.sim.quadType
         Qord = self.sim.Qord
         NQX = self.sim.NQX
         NQY = self.sim.NQY
         xmax = self.sim.xmax
         ymax = self.sim.ymax
+        diffusivity = self.sim.diffusivity
+        velocity = self.sim.velocity
+        # pre-allocate arrays for operator matrix triplets
+        nQuads = 2*Qord*(NX*NQX + NQY)
+        nMaxEntries = int((nNodes * self.volume)**2 * nQuads)
+        Kdata = np.empty(nMaxEntries)
+        Adata = np.empty(nMaxEntries)
+        row_ind = np.empty(nMaxEntries, dtype='int')
+        col_ind = np.empty(nMaxEntries, dtype='int')
+        index = 0
+        
         if vci == 1:
-            integrals = np.zeros((self.nNodes, ndim))
+            integrals = np.zeros((nNodes, ndim))
             phiSums = integrals
         elif vci == 2:
-            integrals = np.zeros((self.nNodes, ndim, 3))
+            integrals = np.zeros((nNodes, ndim, 3))
             phiSums = integrals[:,:,0]
         if quadType.lower() in ('gauss', 'g', 'gaussian'):
             offsets, weights = roots_legendre(Qord)
@@ -293,35 +307,79 @@ class DirichletBoundary(Boundary):
         quads = (np.repeat(quads, Qord).reshape(-1,Qord) + yfac*offsets).ravel()
         for iQ, quad in enumerate(quads):
             quadWeight = quadWeights[iQ]
-            inds, phis = self.sim.phi(np.array((0, quad)))
+            # Left boundary
+            inds, phis, gradphis = self.sim.dphi(np.array((0, quad)))
+            # Operator matrix contributions
+            nEntries = len(inds)**2
+            Kdata[index:index+nEntries] = quadWeight * \
+                np.ravel( np.outer(phis, diffusivity[0] @ gradphis.T) )
+            Adata[index:index+nEntries] = quadWeight * \
+                np.ravel( np.outer(phis,  velocity[0] * phis) )
+            row_ind[index:index+nEntries] = np.repeat(inds, len(inds))
+            col_ind[index:index+nEntries] = np.tile(inds, len(inds))
+            index += nEntries
+            # VCI residuals
             phiSums[inds,0] -= phis * quadWeight
             if vci == 2:
                 disps = self.computeDisplacements(np.array((0, quad)), inds)
                 integrals[inds,0,1:] -= phis[:,np.newaxis] * disps * quadWeight
-            inds, phis = self.sim.phi(np.array((xmax, quad)))
+            # Right boundary
+            inds, phis, gradphis = self.sim.dphi(np.array((xmax, quad)))
+            # Operator matrix contributions
+            nEntries = len(inds)**2
+            Kdata[index:index+nEntries] = quadWeight * \
+                np.ravel( np.outer(phis, -diffusivity[0] @ gradphis.T) )
+            Adata[index:index+nEntries] = quadWeight * \
+                np.ravel( np.outer(phis,  -velocity[0] * phis) )
+            row_ind[index:index+nEntries] = np.repeat(inds, len(inds))
+            col_ind[index:index+nEntries] = np.tile(inds, len(inds))
+            index += nEntries
+            # VCI residuals
             phiSums[inds,0] += phis * quadWeight
             if vci == 2:
                 disps = self.computeDisplacements(np.array((xmax, quad)), inds)
                 integrals[inds,0,1:] += phis[:,np.newaxis] * disps * quadWeight
         # Top/Bottom boundaries
         xfac = 0.5 / NQX
-        for iPlane in range(self.sim.NX):
+        for iPlane in range(NX):
             dx = self.sim.dx[iPlane]
             quads = dx*(0.5 + xfac*offsets) + self.sim.nodeX[iPlane]
             quadWeights = dx * xfac * weights
             for iQ, quad in enumerate(quads):
                 quadWeight = quadWeights[iQ]
-                inds, phis = self.sim.phi(np.array((quad, 0)))
+                # Bottom boundary
+                inds, phis, gradphis = self.sim.dphi(np.array((quad, 0)))
+                # Operator matrix contributions
+                nEntries = len(inds)**2
+                Kdata[index:index+nEntries] = quadWeight * \
+                    np.ravel( np.outer(phis, diffusivity[1] @ gradphis.T) )
+                Adata[index:index+nEntries] = quadWeight * \
+                    np.ravel( np.outer(phis,  velocity[1] * phis) )
+                row_ind[index:index+nEntries] = np.repeat(inds, len(inds))
+                col_ind[index:index+nEntries] = np.tile(inds, len(inds))
+                index += nEntries
+                # VCI residuals
                 phiSums[inds,1] -= phis * quadWeight
                 if vci == 2:
                     disps = self.computeDisplacements(np.array((quad, 0)), inds)
                     integrals[inds,1,1:] -= phis[:,np.newaxis] * disps * quadWeight
-                inds, phis = self.sim.phi(np.array((quad, ymax)))
+                # Top boundary
+                inds, phis, gradphis = self.sim.dphi(np.array((quad, ymax)))
+                # Operator matrix contributions
+                nEntries = len(inds)**2
+                Kdata[index:index+nEntries] = quadWeight * \
+                    np.ravel( np.outer(phis, -diffusivity[1] @ gradphis.T) )
+                Adata[index:index+nEntries] = quadWeight * \
+                    np.ravel( np.outer(phis,  -velocity[1] * phis) )
+                row_ind[index:index+nEntries] = np.repeat(inds, len(inds))
+                col_ind[index:index+nEntries] = np.tile(inds, len(inds))
+                index += nEntries
+                # VCI residuals
                 phiSums[inds,1] += phis * quadWeight
                 if vci == 2:
                     disps = self.computeDisplacements(np.array((quad, ymax)), inds)
                     integrals[inds,1,1:] += phis[:,np.newaxis] * disps * quadWeight
-        return integrals
+        return integrals, (Kdata[:index], Adata[:index], row_ind[:index], col_ind[:index])
 
 
 # class DirichletXPeriodicYBoundary(Boundary):

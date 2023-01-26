@@ -147,8 +147,8 @@ class quadraticPatch:
 # f = QuadraticTestProblem()
 # f = slantedTestProblem()
 # f = simplifiedSlantProblem()
-# f = sinXsinY()
-f = linearPatch()
+f = sinXsinY()
+# f = linearPatch()
 # f = quadraticPatch()
 
 # mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
@@ -159,13 +159,15 @@ mapping = fcimls.mappings.StraightMapping()
 perturbation = 0.
 kwargs={
     'mapping' : mapping,
-    'boundary' : ('Dirichlet', (1.5, f.solution, None)),
-    # 'boundary' : ('periodic', 1.5),
-    'basis' : 'linear',
-    # 'boundary' : ('Dirichlet', (2.5, f.solution, None)),
-    # # 'boundary' : ('periodic', 2.5),
-    # 'basis' : 'quadratic',
+    # 'boundary' : ('Dirichlet', (1.5, f.solution, None)),
+    # # 'boundary' : ('periodic', 1.5),
+    # 'basis' : 'linear',
+    'boundary' : ('Dirichlet', (2.5, f.solution, None)),
+    # 'boundary' : ('periodic', 2.5),
+    'basis' : 'quadratic',
     'kernel' : 'cubic',
+    # 'kernel' : 'quartic',
+    # 'kernel' : 'quintic',
     'velocity' : np.array([0., 0.]),
     'diffusivity' : 1., # Makes diffusivity matrix K into Poisson operator
     'px' : perturbation,
@@ -176,7 +178,7 @@ kwargs={
 
 # allocate arrays for convergence testing
 start = 2
-stop = 4
+stop = 7
 nSamples = np.rint(stop - start + 1).astype('int')
 NX_array = np.logspace(start, stop, num=nSamples, base=2, dtype='int')
 E_inf = np.empty(nSamples)
@@ -210,7 +212,7 @@ for iN, NX in enumerate(NX_array):
     ##### Assemble the mass matrix and forcing term
     sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationConservativeVCI
     sim.computeSpatialDiscretization(f, NQX=NQX, NQY=NQY, Qord=Qord, quadType='g',
-                                     massLumping=False, vci=1)
+                                     massLumping=False, vci=2)
     K, b = sim.boundary.modifyOperatorMatrix(sim.K, sim.b)
 
     # if sim.boundary.name == 'Dirichlet':

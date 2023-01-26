@@ -611,16 +611,16 @@ class FciMlsSim:
         self.Qord = Qord
         self.quadType = quadType
         self.massLumping = massLumping
-        # pre-allocate arrays for stiffness matrix triplets
+        # pre-allocate arrays for operator matrix triplets
         nQuads = NX * NQX * NQY * Qord**2
         self.nQuads = nQuads
         nMaxEntries = int((nNodes * self.boundary.volume)**2 * nQuads)
-        Kdata = np.zeros(nMaxEntries)
-        Adata = np.zeros(nMaxEntries)
+        Kdata = np.empty(nMaxEntries)
+        Adata = np.empty(nMaxEntries)
         if not massLumping:
-            Mdata = np.zeros(nMaxEntries)
-        row_ind = np.zeros(nMaxEntries, dtype='int')
-        col_ind = np.zeros(nMaxEntries, dtype='int')
+            Mdata = np.empty(nMaxEntries)
+        row_ind = np.empty(nMaxEntries, dtype='int')
+        col_ind = np.empty(nMaxEntries, dtype='int')
         self.b = np.zeros(nNodes)
         self.u_weights = np.zeros(nNodes)
 
@@ -628,13 +628,13 @@ class FciMlsSim:
 
         if vci == 2:
             A = np.zeros((self.nNodes, 3, 3))
-            self.rOld = self.boundary.computeBoundaryIntegrals(vci)
+            self.rOld, opMatBints = self.boundary.computeBoundaryIntegrals(vci)
             self.rNew = self.rOld.copy()
             self.gradphiSumsOld = self.rOld[:,:,0]
             self.gradphiSumsNew = self.rNew[:,:,0]
             xis = np.empty((self.nNodes, self.ndim, 3))
         else: # if vci == 1 or None
-            self.gradphiSumsOld = self.boundary.computeBoundaryIntegrals(vci=1)
+            self.gradphiSumsOld, opMatBints = self.boundary.computeBoundaryIntegrals(vci=1)
             # self.gradphiSumsNew = self.gradphiSumsOld
             # if vci == 1:
             #     areas = np.zeros(nNodes)
@@ -722,7 +722,11 @@ class FciMlsSim:
             row_ind[index:index+nEntries] = np.repeat(inds, len(inds))
             col_ind[index:index+nEntries] = np.tile(inds, len(inds))
             index += nEntries
-
+        
+        Kdata = np.concatenate((Kdata[:index], opMatBints[0]))
+        Adata = np.concatenate((Adata[:index], opMatBints[1]))
+        row_ind = np.concatenate((row_ind[:index], opMatBints[2]))
+        col_ind = np.concatenate((col_ind[:index], opMatBints[3]))
         self.K = sp.csr_matrix( (Kdata, (row_ind, col_ind)),
                                 shape=(nNodes, nNodes) )
         self.A = sp.csr_matrix( (Adata, (row_ind, col_ind)),
@@ -730,7 +734,7 @@ class FciMlsSim:
         if massLumping:
             self.M = sp.diags(self.u_weights, format='csr')
         else:
-            self.M = sp.csr_matrix( (Mdata, (row_ind, col_ind)),
+            self.M = sp.csr_matrix( (Mdata[:index], (row_ind[:index], col_ind[:index])),
                                 shape=(nNodes, nNodes) )
 
     def computeSpatialDiscretizationConservativeVCI(self, f=None, NQX=1,
@@ -795,17 +799,17 @@ class FciMlsSim:
         self.Qord = Qord
         self.quadType = quadType
         self.massLumping = massLumping
-        # pre-allocate arrays for stiffness matrix triplets
+        # pre-allocate arrays for operator matrix triplets
         nQuadsPerPlane = NQX * NQY * Qord**2
         nQuads = nQuadsPerPlane * NX
         self.nQuads = nQuads
         nMaxEntries = int((nNodes * self.boundary.volume)**2 * nQuads)
-        Kdata = np.zeros(nMaxEntries)
-        Adata = np.zeros(nMaxEntries)
+        Kdata = np.empty(nMaxEntries)
+        Adata = np.empty(nMaxEntries)
         if not massLumping:
-            Mdata = np.zeros(nMaxEntries)
-        row_ind = np.zeros(nMaxEntries, dtype='int')
-        col_ind = np.zeros(nMaxEntries, dtype='int')
+            Mdata = np.empty(nMaxEntries)
+        row_ind = np.empty(nMaxEntries, dtype='int')
+        col_ind = np.empty(nMaxEntries, dtype='int')
         self.b = np.zeros(nNodes)
         self.u_weights = np.zeros(nNodes)
 
@@ -822,12 +826,12 @@ class FciMlsSim:
         ri = np.empty(nMaxEntries, dtype='int')
         ci = np.empty(nMaxEntries, dtype='int')
 
-        boundaryIntegrals = self.boundary.computeBoundaryIntegrals(vci)
+        vciBints, opMatBints = self.boundary.computeBoundaryIntegrals(vci)
         if vci == 1:
-            self.gradphiSumsOld = boundaryIntegrals.copy()
+            self.gradphiSumsOld = vciBints.copy()
             self.gradphiSumsNew = self.gradphiSumsOld.copy()
         elif vci == 2:
-            self.rOld = boundaryIntegrals.copy()
+            self.rOld = vciBints.copy()
             self.rNew = self.rOld.copy()
             self.gradphiSumsOld = self.rOld[:,:,0]
             self.gradphiSumsNew = self.rNew[:,:,0]
@@ -904,11 +908,11 @@ class FciMlsSim:
         from timeit import default_timer
         start_time = default_timer()
         # solve for quadWeights directly
-        rhs = np.append(boundaryIntegrals.T.ravel(), self.xmax*self.ymax)
+        rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
         quadWeights = ssqr.min2norm(G, rhs).ravel()
         # # solve for corrections to quadWeights
         # quadWeights = np.concatenate(quadWeightsList)
-        # rhs = np.append(boundaryIntegrals.T.ravel(), 0)
+        # rhs = np.append(vciBints.T.ravel(), 0)
         # quadWeightCcorrections = ssqr.min2norm(G, rhs).ravel()
         # quadWeights += quadWeightCcorrections
         print(f'xi solve time = {default_timer()-start_time} s')
@@ -924,7 +928,7 @@ class FciMlsSim:
         # del gd, ci, ri, offsets, weights, quads, quadWeights
         # from timeit import default_timer
         # start_time = default_timer()
-        # rhs = np.append(boundaryIntegrals.T.ravel(), self.xmax*self.ymax)
+        # rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
         # quadWeights = sparse_dot_mkl.sparse_qr_solve_mkl(G, rhs).ravel()
         # print(f'xi solve time = {default_timer()-start_time} s')
         # self.vci_solver = 'sparse_dot_mkl.sparse_qr_solve_mkl'
@@ -932,7 +936,7 @@ class FciMlsSim:
         # ##### Using scipy.sparse.linalg, much slower, but uses less memory #####
         # self.G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),
         #                         shape=(nConstraints, nQuads))
-        # rhs = np.append(boundaryIntegrals.T.ravel(), self.xmax*self.ymax)
+        # rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
         # maxit = 10*nQuads
         # tol = 1e-10
         # from timeit import default_timer
@@ -966,6 +970,10 @@ class FciMlsSim:
             col_ind[index:index+nEntries] = np.tile(inds, len(inds))
             index += nEntries
 
+        Kdata = np.concatenate((Kdata[:index], opMatBints[0]))
+        Adata = np.concatenate((Adata[:index], opMatBints[1]))
+        row_ind = np.concatenate((row_ind[:index], opMatBints[2]))
+        col_ind = np.concatenate((col_ind[:index], opMatBints[3]))
         self.K = sp.csr_matrix( (Kdata, (row_ind, col_ind)),
                                 shape=(nNodes, nNodes) )
         self.A = sp.csr_matrix( (Adata, (row_ind, col_ind)),
@@ -973,7 +981,7 @@ class FciMlsSim:
         if massLumping:
             self.M = sp.diags(self.u_weights, format='csr')
         else:
-            self.M = sp.csr_matrix( (Mdata, (row_ind, col_ind)),
+            self.M = sp.csr_matrix( (Mdata[:index], (row_ind[:index], col_ind[:index])),
                                 shape=(nNodes, nNodes) )
 
     def initializeTimeIntegrator(self, integrator, dt, P='ilu', **kwargs):

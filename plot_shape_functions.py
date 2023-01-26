@@ -37,6 +37,8 @@ kwargs={
     # 'boundary' : ('periodic', 2.5),
     # 'basis' : 'quadratic',
     'kernel' : 'cubic',
+    # 'kernel' : 'quartic',
+    # 'kernel' : 'Gaussian',
     'velocity' : np.array([0., 0.]),
     'diffusivity' : 1., # Makes diffusivity matrix K into Poisson operator
     'px' : perturbation,
@@ -75,10 +77,10 @@ plotVar = phis
 # plotVar = gradphis[:,:,1]
 maxAbs = np.max(np.abs(plotVar))
 
-if sim.boundary.name is 'periodic':
+if sim.boundary.name == 'periodic':
     nx = NX
     ny = NY
-elif sim.boundary.name is 'Dirichlet':
+elif sim.boundary.name == 'Dirichlet':
     nx = NX + 1
     ny = NY + 1
 

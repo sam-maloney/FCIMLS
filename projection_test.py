@@ -58,16 +58,16 @@ class quadraticPatch:
         y = p.reshape(-1,2)[:,1]
         return 0.5 + 0.1*x + 0.8*y + 1.2*x*y + 0.8*x*x + 0.6*y*y
 
-# f = sinXsinY()
+f = sinXsinY()
 # f = QuadraticTestProblem()
 # f = linearPatch()
-f = quadraticPatch()
+# f = quadraticPatch()
 
-mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
+# mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
 # mapping = fcimls.mappings.LinearMapping(1/f.xmax)
-# mapping = fcimls.mappings.StraightMapping()
+mapping = fcimls.mappings.StraightMapping()
 
-perturbation = 0.1
+perturbation = 0.
 kwargs={
     'mapping' : mapping,
     # 'boundary' : ('Dirichlet', (1.5, f, None)),
@@ -87,7 +87,7 @@ kwargs={
 
 # allocate arrays for convergence testing
 start = 2
-stop = 5
+stop = 6
 nSamples = stop - start + 1
 NX_array = np.logspace(start, stop, num=nSamples, base=2, dtype='int32')
 E_inf = np.empty(nSamples, dtype='float64')
@@ -108,10 +108,15 @@ for iN, NX in enumerate(NX_array):
 
 
     # Assemble the mass matrix and forcing term
+    # sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationConservativeVCI
     sim.computeSpatialDiscretization(f, NQX=1, NQY=NY, Qord=2, quadType='g',
                                      massLumping=False, vci=0)
-
-    sim.uI = sp_la.spsolve(sim.M, sim.b)
+    
+    M, b = sim.boundary.modifyOperatorMatrix(sim.M, sim.b)
+    uI = sp_la.spsolve(M, b)
+    sim.uI = uI[:sim.nNodes]
+    
+    # sim.uI = sp_la.spsolve(sim.M, sim.b)
     sim.solve()
 
     # compute the analytic solution and error norms
