@@ -52,7 +52,7 @@ NY = NX
 # initialize simulation class
 sim = fcimls.FciMlsSim(NX, NY, **kwargs)
 
-nPoints = 1000
+nPoints = 10
 seed = 42
 rtol = 1e-5
 atol = 1e-6

@@ -301,43 +301,43 @@ class FciMlsSim:
             Values of phi for all nodes in self.nodes[indices].
 
         """
-        # ##### Centred-and-scaled MLS #####
-        # # --------------------------------------
-        # #     compute the moment matrix A(x)
-        # # --------------------------------------
-        # indices, w, displacements = self.boundary.w(point)
-        # p = self.basis(displacements)
-        # A = w*p.T@p
-        # # --------------------------------------
-        # #      compute vector c(x) and phi
-        # # --------------------------------------
-        # # A(x)c(x) = p(x)
-        # # Backward substitution for c(x) using LU factorization for A
-        # p0 = self.basis.p0()
-        # lu, piv = la.lu_factor(A, overwrite_a=True, check_finite=False)
-        # c = la.lu_solve((lu, piv), p0, overwrite_b=True, check_finite=False)
-        # phis = c @ p.T * w
-        # # np.testing.assert_allclose(phis.sum(), 1., atol=1e-10)
-        # return indices, phis
-
-        ##### Standard MLS #####
+        ##### Centred-and-scaled MLS #####
         # --------------------------------------
         #     compute the moment matrix A(x)
         # --------------------------------------
-        indices, w = self.boundary.w(point)
-        displacements = self.boundary.computeDisplacements(point, indices)
-        p = self.basis(point - displacements)
+        indices, w, displacements = self.boundary.w(point)
+        p = self.basis(displacements)
         A = w*p.T@p
         # --------------------------------------
         #      compute vector c(x) and phi
         # --------------------------------------
         # A(x)c(x) = p(x)
         # Backward substitution for c(x) using LU factorization for A
-        p_x = self.basis(point)[0]
+        p0 = self.basis.p0()
         lu, piv = la.lu_factor(A, overwrite_a=True, check_finite=False)
-        c = la.lu_solve((lu, piv), p_x, overwrite_b=True, check_finite=False)
-        phi = c @ p.T * w
-        return indices, phi
+        c = la.lu_solve((lu, piv), p0, overwrite_b=True, check_finite=False)
+        phis = c @ p.T * w
+        # np.testing.assert_allclose(phis.sum(), 1., atol=1e-10)
+        return indices, phis
+
+        # ##### Standard MLS (Nguyen2008) #####
+        # # --------------------------------------
+        # #     compute the moment matrix A(x)
+        # # --------------------------------------
+        # indices, w, _ = self.boundary.w(point)
+        # displacements = self.boundary.computeDisplacements(point, indices)
+        # p = self.basis(point - displacements)
+        # A = w*p.T@p
+        # # --------------------------------------
+        # #      compute vector c(x) and phi
+        # # --------------------------------------
+        # # A(x)c(x) = p(x)
+        # # Backward substitution for c(x) using LU factorization for A
+        # p_x = self.basis(point)[0]
+        # lu, piv = la.lu_factor(A, overwrite_a=True, check_finite=False)
+        # c = la.lu_solve((lu, piv), p_x, overwrite_b=True, check_finite=False)
+        # phi = c @ p.T * w
+        # return indices, phi
 
     def dphi(self, point):
         """Compute shape function value and gradient at given point.
@@ -359,73 +359,79 @@ class FciMlsSim:
             Has the form numpy.array([[dx1,dy1,dz1],[dx2,dy2,dz2]...])
 
         """
-        # ##### Centred-and-scaled MLS (not finished) #####
+        ##### Centred-and-scaled MLS #####
+        # --------------------------------------
+        #     compute the moment matrix A(x)
+        # --------------------------------------
+        indices, w, gradw, displacements = self.boundary.dw(point)
+        p = self.basis(displacements)
+        A = w*p.T@p
+        dp = self.basis.dp(displacements) * \
+             self.boundary.rsupport.reshape(self.ndim,-1)
+        # re-align gradients to global x-coordinate
+        gradw[:,0] -= self.mapping.deriv(point)*gradw[:,1]
+        dp[:,0] -= self.mapping.deriv(point)*dp[:,1]
+        # TODO: find optimal factorization of dA computation
+        dA = [gradw[:,i]*p.T@p + w*dp[:,i].T@p + w*p.T@dp[:,i]
+              for i in range(self.ndim)]
+        # --------------------------------------
+        #      compute matrix c
+        # --------------------------------------
+        # A(x)c(x) = p(x)
+        # A(x)c_k(x) = b_k(x)
+        # Backward substitutions, once for c(x), ndim times for c_k(x)
+        # Using LU factorization for A
+        p0 = self.basis.p0()
+        lu, piv = la.lu_factor(A, overwrite_a=True, check_finite=False)
+        c = np.empty((self.ndim + 1, self.basis.size))
+        c[0] = la.lu_solve((lu, piv), p0, overwrite_b=True, check_finite=False)
+        for i in range(self.ndim):
+            c[i+1] = la.lu_solve((lu, piv), -dA[i]@c[0], check_finite=False)
+        # --------------------------------------
+        #       compute phi and gradphi
+        # --------------------------------------
+        cp = c[0] @ p.T
+        phis = cp * w
+        gradphis = ( c[1:]@p.T*w + cp*gradw.T).T
+        gradphis[:,0] += (c[0]@dp[:,0].T*w).T
+        gradphis[:,1] += (c[0]@dp[:,1].T*w).T
+        # np.testing.assert_allclose(phis.sum(), 1., atol=1e-10)
+        # np.testing.assert_allclose(gradphis.sum(axis=0), (0,0), atol=1e-10)
+        return indices, phis, gradphis
+
+        # ##### Standard MLS (Nguyen2008) #####
         # # --------------------------------------
         # #     compute the moment matrix A(x)
         # # --------------------------------------
-        # indices, w, gradw, displacements = self.boundary.dw(point)
-        # p = self.basis(displacements)
-        # dp = self.basis.dp(displacements)
+        # indices, w, gradw, _ = self.boundary.dw(point)
+        # displacements = self.boundary.computeDisplacements(point, indices)
+        # p = self.basis(point - displacements)
         # A = w*p.T@p
+        # # re-align gradient to global x-coordinate
+        # gradw[:,0] -= self.mapping.deriv(point)*gradw[:,1]
         # dA = [gradw[:,i]*p.T@p for i in range(self.ndim)]
         # # --------------------------------------
-        # #      compute matrix c
+        # #         compute matrix c
         # # --------------------------------------
-        # # A(x)c(x) = p(x)
+        # # A(x)c(x)   = p(x)
         # # A(x)c_k(x) = b_k(x)
         # # Backward substitutions, once for c(x), ndim times for c_k(x)
         # # Using LU factorization for A
-        # p0 = self.basis.p0()
-        # lu, piv = la.lu_factor(A, overwrite_a=True, check_finite=False)
+        # p_x = self.basis(point)[0]
+        # lu, piv = la.lu_factor(A, check_finite=False)
         # c = np.empty((self.ndim + 1, self.basis.size))
-        # c[0] = la.lu_solve((lu, piv), p0, overwrite_b=True, check_finite=False)
-        # dp0 = self.basis.dp0()
+        # c[0] = la.lu_solve((lu, piv), p_x, check_finite=False)
+        # dp = self.basis.dp(point)
         # for i in range(self.ndim):
-        #     c[i+1] = la.lu_solve( (lu, piv), (dp0[i] - dA[i]@c[0]),
+        #     c[i+1] = la.lu_solve( (lu, piv), (dp[i] - dA[i]@c[0]),
         #                           check_finite=False )
         # # --------------------------------------
         # #       compute phi and gradphi
         # # --------------------------------------
         # cp = c[0] @ p.T
         # phis = cp * w
-        # gradphis = ((+c[1:]@p.T + c[0]@dp.transpose(1,2,0))*w + cp*gradw.T).T
-        # # np.testing.assert_allclose(phis.sum(), 1., atol=1e-10)
-        # # np.testing.assert_allclose(gradphis.sum(axis=0), (0,0), atol=1e-10)
+        # gradphis = ( c[1 : self.ndim + 1]@p.T*w + cp*gradw.T).T
         # return indices, phis, gradphis
-
-        ##### Standard MLS #####
-        # --------------------------------------
-        #     compute the moment matrix A(x)
-        # --------------------------------------
-        indices, w, gradw = self.boundary.dw(point)
-        displacements = self.boundary.computeDisplacements(point, indices)
-        p = self.basis(point - displacements)
-        A = w*p.T@p
-        # re-align gradient to global x-coordinate
-        gradw[:,0] -= self.mapping.deriv(point)*gradw[:,1]
-        dA = [gradw[:,i]*p.T@p for i in range(self.ndim)]
-        # --------------------------------------
-        #         compute matrix c
-        # --------------------------------------
-        # A(x)c(x)   = p(x)
-        # A(x)c_k(x) = b_k(x)
-        # Backward substitutions, once for c(x), ndim times for c_k(x)
-        # Using LU factorization for A
-        p_x = self.basis(point)[0]
-        lu, piv = la.lu_factor(A, check_finite=False)
-        c = np.empty((self.ndim + 1, self.basis.size))
-        c[0] = la.lu_solve((lu, piv), p_x, check_finite=False)
-        dp = self.basis.dp(point)
-        for i in range(self.ndim):
-            c[i+1] = la.lu_solve( (lu, piv), (dp[i] - dA[i]@c[0]),
-                                  check_finite=False )
-        # --------------------------------------
-        #       compute phi and gradphi
-        # --------------------------------------
-        cp = c[0] @ p.T
-        phis = cp * w
-        gradphis = ( c[1 : self.ndim + 1]@p.T*w + cp*gradw.T).T
-        return indices, phis, gradphis
 
     def d2phi(self, point):
         """Compute shape function value and laplacian at given point.

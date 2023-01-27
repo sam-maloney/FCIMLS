@@ -10,7 +10,7 @@ from abc import ABCMeta, abstractmethod
 from scipy.special import roots_legendre
 import numpy as np
 import scipy.sparse as sp
-import warnings
+# import warnings
 
 
 class Boundary(metaclass=ABCMeta):
@@ -58,7 +58,7 @@ class Boundary(metaclass=ABCMeta):
     def w(self, p):
         indices, displacements, distances = self.findNodesInSupport(p)
         w = np.apply_along_axis(self.sim.kernel.w, 0, distances).prod(axis=1)
-        return indices, w
+        return indices, w, displacements
 
     def dw(self, p):
         indices, displacements, distances = self.findNodesInSupport(p)
@@ -70,7 +70,7 @@ class Boundary(metaclass=ABCMeta):
         gradw[:,0] *= w[:,1]
         gradw[:,1] *= w[:,0]
         w = np.prod(w, axis=1)
-        return indices, w, gradw
+        return indices, w, gradw, displacements
 
     def d2w(self, p):
         raise NotImplementedError

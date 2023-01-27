@@ -31,11 +31,12 @@ mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*xmax, xmax)
 perturbation = 0.
 kwargs={
     'mapping' : mapping,
-    'boundary' : ('Dirichlet', (1.5, None, None)),
-    # 'boundary' : ('periodic', 1.5),
-    'basis' : 'linear',
+    # 'boundary' : ('Dirichlet', (1.5, None, None)),
+    # # 'boundary' : ('periodic', 1.5),
+    # 'basis' : 'linear',
+    'boundary' : ('Dirichlet', (2.5, None, None)),
     # 'boundary' : ('periodic', 2.5),
-    # 'basis' : 'quadratic',
+    'basis' : 'quadratic',
     'kernel' : 'cubic',
     # 'kernel' : 'quartic',
     # 'kernel' : 'Gaussian',
@@ -61,8 +62,12 @@ phis = np.zeros((len(points), sim.nNodes))
 gradphis = np.zeros((len(points), sim.nNodes, 2))
 for i, point in enumerate(points):
     inds, local_phis, local_gradphis = sim.dphi(point)
+    # inds, local_phis = sim.phi(point)
     phis[i, inds] = local_phis
     gradphis[i, inds] = local_gradphis
+    phiError = np.abs(local_phis.sum() - 1)
+    if phiError > 1e-10:
+        print(f'No partition of unity for point {i} = {point}, error = {phiError}')
 
 # open new figure
 fig = plt.figure(figsize=(15, 13))

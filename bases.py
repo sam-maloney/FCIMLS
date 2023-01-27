@@ -29,6 +29,23 @@ class Basis(metaclass=ABCMeta):
 
         """
         raise NotImplementedError
+    
+    @abstractmethod
+    def dp0(self):
+        """The values of the basis function derivatives computed at the origin.
+
+        Parameters
+        ----------
+        None
+
+        Returns
+        -------
+        numpy.ndarray, dtype='float64', shape=(ndim, self.size)
+            Values of the basis function derivatives computed at the origin.
+            The rows correspond to different spatial dimensions.
+
+        """
+        raise NotImplementedError
 
     @abstractmethod
     def p(self, p):
@@ -106,13 +123,15 @@ class LinearBasis(Basis):
         return self._dp.copy()
 
     def p(self, p):
-        nPoints = p.size // 2
+        nPoints = p.size // self.ndim
         return np.hstack((np.ones((nPoints, 1)), p.reshape(-1, self.ndim)))
 
     def dp(self, p):
-        # nPoints = p.size // 2
-        # return np.repeat(self._dp[np.newaxis,:,:], nPoints, axis=0)
-        return self._dp.copy()
+        if p.size == self.ndim:
+            return self._dp.copy()
+        else:
+            nPoints = p.size // self.ndim
+            return np.repeat(self._dp[np.newaxis,:,:], nPoints, axis=0)
 
     def d2p(self, p=None):
         return self._d2p.copy()
@@ -147,7 +166,7 @@ class QuadraticBasis(Basis):
         return self._dp0.copy()
 
     def p(self, p):
-        nPoints = p.size // 2
+        nPoints = p.size // self.ndim
         if self.ndim == 1:
             return np.hstack((np.ones((nPoints,1)), p.reshape(-1,1),
                               p.reshape(-1,1)**2))
@@ -164,20 +183,50 @@ class QuadraticBasis(Basis):
                               x**2, x*y, x*z, y**2, y*z, z**2))
 
     def dp(self, p):
-        if self.ndim == 1:
-            return np.hstack((self._dpLinear,2.*p.reshape(1,1)))
-        elif self.ndim == 2:
-            x = p.flat[0]
-            y = p.flat[1]
-            return np.hstack((self._dpLinear,((2.*x, y,  0. ),
-                                              ( 0. , x, 2.*y))))
-        elif self.ndim == 3:
-            x = p.flat[0]
-            y = p.flat[1]
-            z = p.flat[2]
-            return np.hstack((self._dpLinear,((2.*x, y , z ,  0. , 0.,  0. ),
-                                              ( 0. , x , 0., 2.*y, z ,  0. ),
-                                              ( 0. , 0., x ,  0. , y , 2.*z))))
+        if p.size == self.ndim:
+            if self.ndim == 1:
+                return np.hstack((self._dpLinear, 2.*p.reshape(1,1)))
+            elif self.ndim == 2:
+                x = p.flat[0]
+                y = p.flat[1]
+                return np.hstack((self._dpLinear, ((2.*x, y,  0. ),
+                                                   ( 0. , x, 2.*y))))
+            elif self.ndim == 3:
+                x = p.flat[0]
+                y = p.flat[1]
+                z = p.flat[2]
+                return np.hstack((
+                    self._dpLinear, ((2.*x, y , z ,  0. , 0.,  0. ),
+                                     ( 0. , x , 0., 2.*y, z ,  0. ),
+                                     ( 0. , 0., x ,  0. , y , 2.*z)) ))
+        else:
+            nPoints = p.size // self.ndim
+            dp = np.zeros((nPoints, self.ndim, self.size))
+            dp[:,:,:self.ndim+1] = \
+                np.repeat(self._dpLinear[np.newaxis,:,:], nPoints, axis=0)
+            if self.ndim == 1:
+                dp[:,:,-1] = 2.*p.reshape(1,1)
+            elif self.ndim == 2:
+                x = p.reshape(-1,2)[:,0]
+                y = p.reshape(-1,2)[:,1]
+                dp[:,0,-3] = 2.*x
+                dp[:,0,-2] = y
+                dp[:,1,-2] = x
+                dp[:,1,-1] = 2.*y
+            elif self.ndim == 3:
+                x = p.reshape(-1,3)[:,0]
+                y = p.reshape(-1,3)[:,1]
+                z = p.reshape(-1,3)[:,2]
+                dp[:,0,-6] = 2.*x
+                dp[:,0,-5] = y
+                dp[:,0,-4] = z
+                dp[:,1,-5] = x
+                dp[:,1,-3] = 2.*y
+                dp[:,1,-2] = z
+                dp[:,2,-4] = x
+                dp[:,2,-2] = y
+                dp[:,2,-1] = 2.*z
+            return dp
 
     def d2p(self, p=None):
         return self._d2p.copy()
