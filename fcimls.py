@@ -6,6 +6,7 @@ Created on Mon Jun  8 13:47:07 2020
 
 """
 
+from timeit import default_timer
 from scipy.special import roots_legendre
 import scipy.linalg as la
 import scipy.sparse as sp
@@ -189,11 +190,13 @@ class FciMlsSim:
         if "nodeX" in kwargs:
             self.nodeX = kwargs["nodeX"]
         else:
-            self.nodeX = xmax*np.arange(NX+1)/NX
-            px *= xmax/NX
+            dx = xmax/NX
+            self.nodeX = dx*np.arange(0, NX+1, 1)
+            px *= dx
             self.nodeX[1:-1] += rng.uniform(-px, px, self.nodeX[1:-1].shape)
-        self.nodeY = np.tile(np.linspace(0, ymax, NY+1), NX+1).reshape(NX+1,-1)
-        py /= NY
+        dy = ymax/NY
+        self.nodeY = np.tile(dy*np.arange(0, NY+1, 1), NX+1).reshape(NX+1,-1)
+        py *= dy
         self.nodeY[:-1,1:-1] += rng.uniform(-py, py, self.nodeY[:-1,1:-1].shape)
         self.nodeY[-1] = self.nodeY[0]
         self.dx = self.nodeX[1:] - self.nodeX[0:-1]
@@ -317,7 +320,10 @@ class FciMlsSim:
         lu, piv = la.lu_factor(A, overwrite_a=True, check_finite=False)
         c = la.lu_solve((lu, piv), p0, overwrite_b=True, check_finite=False)
         phis = c @ p.T * w
-        # np.testing.assert_allclose(phis.sum(), 1., atol=1e-10)
+        if indices.size < self.basis.size:
+            print(f"Error: insufficient coverage at p = {point}")
+        if np.abs(phis.sum() - 1) > 1e-10:
+            print(f"Error: phis not partition of unity at p = {point}")
         return indices, phis
 
         # ##### Standard MLS (Nguyen2008) #####
@@ -365,14 +371,14 @@ class FciMlsSim:
         # --------------------------------------
         indices, w, gradw, displacements = self.boundary.dw(point)
         p = self.basis(displacements)
-        A = w*p.T@p
         dp = self.basis.dp(displacements) * \
              self.boundary.rsupport.reshape(self.ndim,-1)
         # re-align gradients to global x-coordinate
         gradw[:,0] -= self.mapping.deriv(point)*gradw[:,1]
         dp[:,0] -= self.mapping.deriv(point)*dp[:,1]
-        # TODO: find optimal factorization of dA computation
-        dA = [gradw[:,i]*p.T@p + w*dp[:,i].T@p + w*p.T@dp[:,i]
+        wp = w*p.T
+        A = wp@p
+        dA = [gradw[:,i]*p.T@p + dp[:,i].T@wp.T + wp@dp[:,i]
               for i in range(self.ndim)]
         # --------------------------------------
         #      compute matrix c
@@ -395,7 +401,10 @@ class FciMlsSim:
         gradphis = ( c[1:]@p.T*w + cp*gradw.T).T
         gradphis[:,0] += (c[0]@dp[:,0].T*w).T
         gradphis[:,1] += (c[0]@dp[:,1].T*w).T
-        # np.testing.assert_allclose(phis.sum(), 1., atol=1e-10)
+        if indices.size < self.basis.size:
+            print(f"Error: insufficient coverage at p = {point}")
+        if np.abs(phis.sum() - 1) > 1e-10:
+            print(f"Error: phis not partition of unity at p = {point}")
         # np.testing.assert_allclose(gradphis.sum(axis=0), (0,0), atol=1e-10)
         return indices, phis, gradphis
 
@@ -542,7 +551,7 @@ class FciMlsSim:
         index = 0
         for iN, node in enumerate(self.nodes):
             inds, phis = self.phi(node)
-            nEntries = len(inds)
+            nEntries = inds.size
             data[index:index+nEntries] = phis
             indices[index:index+nEntries] = inds
             indptr[iN] = index
@@ -615,7 +624,6 @@ class FciMlsSim:
         self.NQX = NQX
         self.NQY = NQY
         self.Qord = Qord
-        self.quadType = quadType
         self.massLumping = massLumping
         # pre-allocate arrays for operator matrix triplets
         nQuads = NX * NQX * NQY * Qord**2
@@ -630,7 +638,7 @@ class FciMlsSim:
         self.b = np.zeros(nNodes)
         self.u_weights = np.zeros(nNodes)
 
-        self.store = []
+        storage = []
 
         if vci == 2:
             A = np.zeros((self.nNodes, 3, 3))
@@ -652,9 +660,11 @@ class FciMlsSim:
         for iPlane in range(NX):
             dx = self.dx[iPlane]
             ##### generate quadrature points
-            if quadType.lower() in ('gauss', 'g', 'gaussian'):
+            if quadType.lower()[0] == 'g':
+                self.quadType = 'Gauss-Legendre'
                 offsets, weights = roots_legendre(Qord)
-            elif quadType.lower() in ('uniform', 'u'):
+            elif quadType.lower()[0] == 'u':
+                self.quadType = 'uniform'
                 offsets = np.arange(1/Qord - 1, 1, 2/Qord)
                 weights = np.full(Qord, 2/Qord)
             offsets = (offsets * dx * 0.5 / NQX, offsets * 0.5 / NQY)
@@ -675,8 +685,8 @@ class FciMlsSim:
                 self.gradphiSumsOld[inds] -= gradphis * quadWeight
                 if vci == 2:
                     disps = self.boundary.computeDisplacements(quad, inds)
-                    self.store.append((inds, phis, gradphis, quadWeight, disps))
-                    P = np.hstack((np.ones((len(inds), 1)), disps))
+                    storage.append((inds, phis, gradphis, quadWeight, disps))
+                    P = np.hstack((np.ones((inds.size, 1)), disps))
                     A[inds] += quadWeight * \
                         np.apply_along_axis(lambda x: np.outer(x,x), 1, P)
                     self.rOld[inds,0,1] -= phis * quadWeight
@@ -684,23 +694,26 @@ class FciMlsSim:
                     self.rOld[inds,:,1:] -= np.apply_along_axis(lambda x: np.outer(x[0:2],
                         x[2:4]), 1, np.hstack((gradphis, disps))) * quadWeight
                 else: # if vci == 1 or None
-                    self.store.append((inds, phis, gradphis, quadWeight))
+                    storage.append((inds, phis, gradphis, quadWeight))
                     # if vci == 1:
                     #     areas[inds] += quadWeight
                     areas[inds] += quadWeight
                 if f is not None:
                     self.b[inds] += quadWeight * f(quad) * phis
+        
+        del offsets, weights, quads
 
         if vci == 1:
             xis = self.gradphiSumsOld / areas.reshape(-1,1)
+            del areas
         elif vci == 2:
             for i, row in enumerate(A):
                 lu, piv = la.lu_factor(A[i], True, False)
                 for j in range(self.ndim):
-                    xis[i,j] = la.lu_solve((lu, piv), self.rOld[i,j], 0, False, False)
+                    xis[i,j] = la.lu_solve((lu, piv), self.rOld[i,j], 0, False, False)            
 
         index = 0
-        for items in self.store:
+        for items in storage:
             if vci == 2:
                 inds, phis, gradphis, quadWeight, disps = items
                 testgrads = ( gradphis + xis[inds,:,0] +
@@ -717,7 +730,7 @@ class FciMlsSim:
                     testgrads = gradphis
             self.gradphiSumsNew[inds] -= testgrads * quadWeight
             self.u_weights[inds] += quadWeight * phis
-            nEntries = len(inds)**2
+            nEntries = inds.size**2
             Kdata[index:index+nEntries] = quadWeight * \
                 np.ravel( testgrads @ (self.diffusivity @ gradphis.T) )
             Adata[index:index+nEntries] = quadWeight * \
@@ -725,9 +738,11 @@ class FciMlsSim:
             if not massLumping:
                 Mdata[index:index+nEntries] = quadWeight * \
                     np.ravel( np.outer(phis, phis) )
-            row_ind[index:index+nEntries] = np.repeat(inds, len(inds))
-            col_ind[index:index+nEntries] = np.tile(inds, len(inds))
+            row_ind[index:index+nEntries] = np.repeat(inds, inds.size)
+            col_ind[index:index+nEntries] = np.tile(inds, inds.size)
             index += nEntries
+            
+        del storage
         
         Kdata = np.concatenate((Kdata[:index], opMatBints[0]))
         Adata = np.concatenate((Adata[:index], opMatBints[1]))
@@ -803,7 +818,6 @@ class FciMlsSim:
         self.NQX = NQX
         self.NQY = NQY
         self.Qord = Qord
-        self.quadType = quadType
         self.massLumping = massLumping
         # pre-allocate arrays for operator matrix triplets
         nQuadsPerPlane = NQX * NQY * Qord**2
@@ -819,7 +833,7 @@ class FciMlsSim:
         self.b = np.zeros(nNodes)
         self.u_weights = np.zeros(nNodes)
 
-        self.store = []
+        storage = []
         quadWeightsList = []
 
         if vci == 1:
@@ -827,6 +841,8 @@ class FciMlsSim:
         elif vci == 2:
             nConstraintsPerNode = 6
         nConstraints = nConstraintsPerNode * nNodes
+        if nQuads < nConstraints:
+            print('Warning: less quadrature points than VCI constraints')
         nMaxEntries = int(nQuads * (nConstraints * self.boundary.volume + 1))
         gd = np.empty(nMaxEntries)
         ri = np.empty(nMaxEntries, dtype='int')
@@ -847,9 +863,11 @@ class FciMlsSim:
         for iPlane in range(NX):
             dx = self.dx[iPlane]
             ##### generate quadrature points
-            if quadType.lower() in ('gauss', 'g', 'gaussian'):
+            if quadType.lower()[0] == 'g':
+                self.quadType = 'Gauss-Legendre'
                 offsets, weights = roots_legendre(Qord)
-            elif quadType.lower() in ('uniform', 'u'):
+            elif quadType.lower()[0] == 'u':
+                self.quadType = 'uniform'
                 offsets = np.arange(1/Qord - 1, 1, 2/Qord)
                 weights = np.full(Qord, 2/Qord)
             offsets = (offsets * dx * 0.5 / NQX, offsets * 0.5 / NQY)
@@ -879,15 +897,15 @@ class FciMlsSim:
                 quadWeight = quadWeights[iQ]
                 self.gradphiSumsOld[inds] -= gradphis * quadWeight
                 if vci == 1:
-                    self.store.append((quad, inds, phis, gradphis))
-                if vci == 2:
+                    storage.append((quad, inds, phis, gradphis))
+                elif vci == 2:
                     disps = self.boundary.computeDisplacements(quad, inds)
                     rDisps = np.apply_along_axis(lambda x: np.outer(x[0:2],
                         x[2:4]), 1, np.hstack((gradphis, disps)))
                     rDisps[:,0,0] += phis
                     rDisps[:,1,1] += phis
                     self.rOld[inds,:,1:] -= rDisps * quadWeight
-                    self.store.append((quad, inds, phis, gradphis, rDisps))
+                    storage.append((quad, inds, phis, gradphis, rDisps))
                     nEntries = 4*nInds
                     gd[index:index+nEntries] = rDisps.T.ravel()
                     ri[index:index+nInds] = inds + 2*nNodes
@@ -896,7 +914,7 @@ class FciMlsSim:
                     ri[index+3*nInds:index+nEntries] = inds + 5*nNodes
                     index += nEntries
                 
-                quadWeightsList.append(quadWeights)
+            quadWeightsList.append(quadWeights)
 
         # Add final constraint that sum of weights equal domain area
         nConstraints += 1
@@ -907,24 +925,27 @@ class FciMlsSim:
         index += nQuads
 
         ##### Using SuiteSparse min2norm (QR based solver) #####
+        self.vci_solver = 'ssqr.min2norm'
         G = sp.csc_matrix((gd[:index], (ri[:index], ci[:index])),
                           shape=(np.iinfo('int32').max + 1, nQuads))
         G._shape = (nConstraints, nQuads)
         del gd, ci, ri, offsets, weights, quads
-        from timeit import default_timer
         start_time = default_timer()
-        # solve for quadWeights directly
-        rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
-        quadWeights = ssqr.min2norm(G, rhs).ravel()
-        # # solve for corrections to quadWeights
-        # quadWeights = np.concatenate(quadWeightsList)
-        # rhs = np.append(vciBints.T.ravel(), 0)
-        # quadWeightCcorrections = ssqr.min2norm(G, rhs).ravel()
-        # quadWeights += quadWeightCcorrections
+        # ### solve for quadWeights directly (does not work as well!)
+        # rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
+        # quadWeights = ssqr.min2norm(G, rhs).ravel()
+        ### solve for corrections to quadWeights
+        quadWeights = np.concatenate(quadWeightsList)
+        if vci == 1:
+            rhs = np.append(self.gradphiSumsOld.T.ravel(), 0)
+        elif vci == 2:
+            rhs = np.append(self.rOld.T.ravel(), 0)
+        quadWeightCorrections = ssqr.min2norm(G, rhs).ravel()
+        quadWeights += quadWeightCorrections
         print(f'xi solve time = {default_timer()-start_time} s')
-        self.vci_solver = 'ssqr.min2norm'
         
         # ##### Using sparse_dot_mkl (QR based solver) (not-working) #####
+        # self.vci_solver = 'sparse_dot_mkl.sparse_qr_solve_mkl'
         # import sparse_dot_mkl
         # # G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),
         # #                   shape=(nConstraints, np.iinfo('int32').max + 1))
@@ -932,28 +953,51 @@ class FciMlsSim:
         # G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),
         #                   shape=(nConstraints, nQuads))
         # del gd, ci, ri, offsets, weights, quads, quadWeights
-        # from timeit import default_timer
         # start_time = default_timer()
         # rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
         # quadWeights = sparse_dot_mkl.sparse_qr_solve_mkl(G, rhs).ravel()
         # print(f'xi solve time = {default_timer()-start_time} s')
-        # self.vci_solver = 'sparse_dot_mkl.sparse_qr_solve_mkl'
 
         # ##### Using scipy.sparse.linalg, much slower, but uses less memory #####
-        # self.G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),
+        # G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),
         #                         shape=(nConstraints, nQuads))
-        # rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
-        # maxit = 10*nQuads
+        # maxit = 100*nQuads
         # tol = 1e-10
-        # from timeit import default_timer
         # start_time = default_timer()
-        # # quadWeights = sp_la.lsmr(self.G, rhs, atol=tol, btol=tol, maxiter=maxit)[0]
-        # quadWeights = sp_la.lsqr(self.G, rhs, atol=tol, btol=tol, iter_lim=maxit)[0]
-        # print(f'xi solve time = {default_timer()-start_time} s')
+        # # ### solve for quadWeights directly (does not work nearly as well!)
+        # # rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
+        # # # quadWeights = sp_la.lsmr(self.G, rhs, atol=tol, btol=tol, maxiter=maxit)[0]
+        # # # self.vci_solver = 'scipy.sparse.linalg.lsmr'
+        # # quadWeights = sp_la.lsqr(self.G, rhs, atol=tol, btol=tol, iter_lim=maxit)[0]
+        # # self.vci_solver = 'scipy.sparse.linalg.lsqr'
+        # ### solve for corrections to quadWeights
+        # quadWeights = np.concatenate(quadWeightsList)
+        # if vci == 1:
+        #     rhs = np.append(self.gradphiSumsOld.T.ravel(), 0)
+        # elif vci == 2:
+        #     rhs = np.append(self.rOld.T.ravel(), 0)
+        # # scale rows of G
+        # for i in range(G.shape[0]):
+        #     norm = np.sqrt((G.data[G.indptr[i]:G.indptr[i+1]]**2).sum())
+        #     G.data[G.indptr[i]:G.indptr[i+1]] /= norm
+        #     rhs[i] /= norm
+        # # self.vci_solver = 'scipy.sparse.linalg.lsmr'
+        # # quadWeightCorrections = sp_la.lsmr(G, rhs, atol=tol, btol=tol, maxiter=maxit)
         # self.vci_solver = 'scipy.sparse.linalg.lsqr'
+        # quadWeightCorrections = sp_la.lsqr(G, rhs, atol=tol, btol=tol, iter_lim=maxit)
+        # if quadWeightCorrections[1] == 7:
+        #     print('Max iterations reached in xi solve')
+        # quadWeights += quadWeightCorrections[0]
+        # print(f'xi solve time = {default_timer()-start_time} s')
+        
+        del G, rhs, quadWeightsList
+        try:
+            del quadWeightCorrections
+        except:
+            pass
 
         index = 0
-        for iQ, items in enumerate(self.store):
+        for iQ, items in enumerate(storage):
             quadWeight = quadWeights[iQ]
             if vci == 1:
                 quad, inds, phis, gradphis = items
@@ -964,7 +1008,7 @@ class FciMlsSim:
             self.u_weights[inds] += quadWeight * phis
             if f is not None:
                 self.b[inds] += f(quad) * phis * quadWeight
-            nEntries = len(inds)**2
+            nEntries = inds.size**2
             Kdata[index:index+nEntries] = quadWeight * \
                 np.ravel( gradphis @ (self.diffusivity @ gradphis.T) )
             Adata[index:index+nEntries] = quadWeight * \
@@ -972,9 +1016,11 @@ class FciMlsSim:
             if not massLumping:
                 Mdata[index:index+nEntries] = quadWeight * \
                     np.ravel( np.outer(phis, phis) )
-            row_ind[index:index+nEntries] = np.repeat(inds, len(inds))
-            col_ind[index:index+nEntries] = np.tile(inds, len(inds))
+            row_ind[index:index+nEntries] = np.repeat(inds, inds.size)
+            col_ind[index:index+nEntries] = np.tile(inds, inds.size)
             index += nEntries
+        
+        del storage
 
         Kdata = np.concatenate((Kdata[:index], opMatBints[0]))
         Adata = np.concatenate((Adata[:index], opMatBints[1]))
@@ -1119,7 +1165,7 @@ class FciMlsSim:
         self.X.append(np.full(NY*ny+1, self.xmax))
         self.X = np.concatenate(self.X)
         self.Y = np.tile(points[0:NY*ny + 1,1], NX*nx + 1)
-        self.U = np.empty(len(self.X))
+        self.U = np.empty(self.X.size)
         for i, x in enumerate(self.X):
             self.U[i] = np.sum(self.phiPlot[i] * self.uPlot[self.indPlot[i]])
 

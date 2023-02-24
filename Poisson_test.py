@@ -8,6 +8,7 @@ Created on Mon Jun  8 13:47:07 2020
 
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy.sparse as sp
 import scipy.sparse.linalg as sp_la
 
 import fcimls
@@ -145,25 +146,25 @@ class quadraticPatch:
         return 0.5 + 0.1*x + 0.8*y + 1.2*x*y + self.xx*x*x + self.yy*y*y
 
 # f = QuadraticTestProblem()
-# f = slantedTestProblem()
+f = slantedTestProblem()
 # f = simplifiedSlantProblem()
-f = sinXsinY()
+# f = sinXsinY()
 # f = linearPatch()
 # f = quadraticPatch()
 
 # mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
 # mapping = fcimls.mappings.QuadraticMapping(f.a, f.b)
-# mapping = fcimls.mappings.LinearMapping(1/f.xmax)
-mapping = fcimls.mappings.StraightMapping()
+mapping = fcimls.mappings.LinearMapping(1/f.xmax)
+# mapping = fcimls.mappings.StraightMapping()
 
-perturbation = 0.
+perturbation = 0.1
 kwargs={
     'mapping' : mapping,
     # 'boundary' : ('Dirichlet', (1.5, f.solution, None)),
     # # 'boundary' : ('periodic', 1.5),
     # 'basis' : 'linear',
-    'boundary' : ('Dirichlet', (2.5, f.solution, None)),
-    # 'boundary' : ('periodic', 2.5),
+    # 'boundary' : ('Dirichlet', (2.89, f.solution, 1)),
+    'boundary' : ('periodic', 2.5),
     'basis' : 'quadratic',
     'kernel' : 'cubic',
     # 'kernel' : 'quartic',
@@ -178,7 +179,7 @@ kwargs={
 
 # allocate arrays for convergence testing
 start = 2
-stop = 7
+stop = 6
 nSamples = np.rint(stop - start + 1).astype('int')
 NX_array = np.logspace(start, stop, num=nSamples, base=2, dtype='int')
 E_inf = np.empty(nSamples)
@@ -196,22 +197,35 @@ for iN, NX in enumerate(NX_array):
 
     start_time = default_timer()
 
-    NY = 1*NX
+    Nratio = 16
+
+    NY = NX*Nratio
     # NX = 16
 
+    # NQX = Nratio // 2
     NQX = 1
-    # NQX = max(NY//NX, 1)
     NQY = NY
-    Qord = 3
+    Qord = 5
 
     ##### allocate arrays and compute grid
     sim = fcimls.FciMlsSim(NX, NY, **kwargs)
+    
+    # ##### Add extra node(s)
+    # extraNodes = np.array([[1 - 0.5*sim.dx[-1], 0.5*sim.dy[-1,0]]])
+    # sim.boundary.nNodes += len(extraNodes)
+    # sim.nNodes = sim.boundary.nNodes
+    # sim.boundary.nodes = np.vstack((extraNodes, sim.nodes))
+    # sim.nodes = sim.boundary.nodes
+    # sim.nodesMapped = sim.nodes.copy()
+    # sim.nodesMapped[:,1] = sim.boundary.mapping(sim.nodes, 0)
+    # sim.boundary.isBoundaryNode = np.concatenate(
+    #     (np.full(len(extraNodes), False), sim.boundary.isBoundaryNode) )
 
     print(f'NX = {NX},\tNY = {NY},\tnNodes = {sim.nNodes}')
 
     ##### Assemble the mass matrix and forcing term
     sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationConservativeVCI
-    sim.computeSpatialDiscretization(f, NQX=NQX, NQY=NQY, Qord=Qord, quadType='g',
+    sim.computeSpatialDiscretization(f, NQX=NQX, NQY=NQY, Qord=Qord, quadType='u',
                                      massLumping=False, vci=2)
     K, b = sim.boundary.modifyOperatorMatrix(sim.K, sim.b)
 
@@ -229,13 +243,36 @@ for iN, NX in enumerate(NX_array):
 
     if sim.boundary.name == 'periodic':
         ##### Enforce exact solution constraints directly #####
-        # Sets all nodes on x and y axes via strong-form co-location
-        for n, node in enumerate(sim.nodes):
-            if node.prod() == 0.:
-                inds, phis = sim.phi(node)
-                sim.K.data[sim.K.indptr[n]:sim.K.indptr[n+1]] = 0.
-                sim.K[n,inds] = phis
-                sim.b[n] = f.solution(sim.nodes[n])
+        # ### Sets all nodes on x and y axes via strong-form co-location
+        # for n, node in enumerate(sim.nodes):
+        #     if node.prod() == 0.:
+        #         inds, phis = sim.phi(node)
+        #         sim.K.data[sim.K.indptr[n]:sim.K.indptr[n+1]] = 0.
+        #         sim.K[n,inds] = phis
+        #         sim.b[n] = f.solution(node)
+        
+        ### Sets all nodes on x and y axes using Lagrange multipliers
+        isAxesNode = sim.nodes.prod(axis=1) == 0
+        nAxesNodes = np.count_nonzero(isAxesNode)
+        nMaxEntries = int((sim.nNodes * sim.boundary.volume)**2 * nAxesNodes)
+        data = np.zeros(nMaxEntries)
+        row_ind = np.zeros(nMaxEntries, dtype='uint32')
+        col_ind = np.zeros(nMaxEntries, dtype='uint32')
+        index = 0
+        axesNodes = sim.nodes[isAxesNode]
+        for iNode, node in enumerate(axesNodes):
+            indices, phis = sim.phi(node)
+            nEntries = indices.size
+            data[index:index+nEntries] = phis
+            row_ind[index:index+nEntries] = indices
+            col_ind[index:index+nEntries] = np.repeat(iNode, nEntries)
+            index += nEntries
+        inds = np.flatnonzero(data.round(decimals=14,out=data))
+        G = sp.csr_matrix( (data[inds], (row_ind[inds], col_ind[inds])),
+                            shape=(sim.nNodes, nAxesNodes) )
+        axesValues = f.solution(axesNodes)
+        K = sp.bmat([[sim.K, G], [G.T, None]], format='csr')
+        b = np.concatenate((sim.b, axesValues))
 
     t_setup[iN] = default_timer()-start_time
     print(f'setup time = {t_setup[iN]:.8e} s')
@@ -266,6 +303,7 @@ print(f'px = {kwargs["px"]}, py = {kwargs["py"]}, seed = {kwargs["seed"]}')
 print(f'basis = {sim.basis.name}, kernel = {sim.kernel.name}')
 print(f'boundary = {sim.boundary}')
 print(f'NQX = {NQX}, NQY = {NQY//NY}*NY, Qord = {Qord}')
+print(f'massLumping = {sim.massLumping}, quadType = {sim.quadType}')
 print(f'VCI: {sim.vci} using {sim.vci_solver}\n')
 with np.printoptions(formatter={'float': lambda x: format(x, '.8e')}):
     print('E_2     =', repr(E_2))
@@ -274,95 +312,99 @@ with np.printoptions(formatter={'float': lambda x: format(x, '.8e')}):
     print('t_solve =', repr(t_solve))
 
 
-#%% Plotting
+# #%% Plotting
 
-plt.rc('pdf', fonttype=42)
-plt.rc('text', usetex=True)
-plt.rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
-# fontsize : int or {'xx-small', 'x-small', 'small', 'medium', 'large', 'x-large', 'xx-large'}
-# plt.rc('font', size='small')
-# plt.rc('legend', fontsize='small')
-# plt.rc('axes', titlesize='medium', labelsize='medium')
-# plt.rc('xtick', labelsize='small')
-# plt.rc('ytick', labelsize='small')
-# plt.rc('figure', titlesize='large')
+# plt.rc('pdf', fonttype=42)
+# plt.rc('text', usetex=True)
+# plt.rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
+# # fontsize : int or {'xx-small', 'x-small', 'small', 'medium', 'large', 'x-large', 'xx-large'}
+# # plt.rc('font', size='small')
+# # plt.rc('legend', fontsize='small')
+# # plt.rc('axes', titlesize='medium', labelsize='medium')
+# # plt.rc('xtick', labelsize='small')
+# # plt.rc('ytick', labelsize='small')
+# # plt.rc('figure', titlesize='large')
 
-# clear the current figure, if opened, and set parameters
-fig = plt.figure(figsize=(7.75, 3))
-fig.subplots_adjust(hspace=0.3, wspace=0.3)
+# # clear the current figure, if opened, and set parameters
+# fig = plt.figure(figsize=(7.75, 3))
+# fig.subplots_adjust(hspace=0.3, wspace=0.3)
 
-# sim.generatePlottingPoints(nx=1, ny=1)
-sim.generatePlottingPoints(nx=int(max(NY/NX,1)), ny=int(max(NX/NY,1)))
-sim.computePlottingSolution()
+# # sim.generatePlottingPoints(nx=1, ny=1)
+# sim.generatePlottingPoints(nx=int(max(NY/NX,1)), ny=int(max(NX/NY,1)))
+# sim.computePlottingSolution()
 
-# vmin = np.min(sim.U)
-# vmax = np.max(sim.U)
+# # vmin = np.min(sim.U)
+# # vmax = np.max(sim.U)
 
-exactSol = f.solution(np.vstack((sim.X,sim.Y)).T)
-error = sim.U - exactSol
-maxAbsErr = np.max(np.abs(error))
-# maxAbsErr = np.max(np.abs(sim.u - uExact))
-vmin = -maxAbsErr
-vmax = maxAbsErr
+# exactSol = f.solution(np.vstack((sim.X,sim.Y)).T)
+# error = sim.U - exactSol
+# maxAbsErr = np.max(np.abs(error))
+# # maxAbsErr = np.max(np.abs(sim.u - uExact))
+# vmin = -maxAbsErr
+# vmax = maxAbsErr
 
-ax1 = plt.subplot(121)
-ax1.set_title('Final Solution')
-field = ax1.tripcolor(sim.X, sim.Y, error, shading='gouraud'
-                        ,cmap='seismic', vmin=vmin, vmax=vmax)
-# field = ax1.tripcolor(sim.nodes[:,0], sim.nodes[:,1], sim.u - uExact
-#                     ,shading='gouraud', cmap='seismic', vmin=vmin, vmax=vmax)
-# field = ax1.tripcolor(sim.nodes[:,0], sim.nodes[:,1], sim.u, shading='gouraud')
-# field = ax1.tripcolor(sim.X, sim.Y, sim.U, shading='gouraud')
-# field = ax1.tripcolor(sim.X, sim.Y, exactSol, shading='gouraud')
-# field = ax1.tripcolor(sim.X, sim.Y, f(np.vstack((sim.X,sim.Y)).T), shading='gouraud')
-x = np.linspace(0, sim.nodeX[-1], 100)
-for yi in [0.4, 0.5, 0.6]:
-    try:
-        ax1.plot(x, [sim.BC.mapping(np.array([[0, yi]]), i) for i in x], 'k')
-    except:
-        ax1.plot(x, [sim.mapping(np.array([[0, yi]]), i) % 1 for i in x], 'k')
-# for xi in sim.nodeX:
-#     ax1.plot([xi, xi], [0, 1], 'k:')
-# ax.plot(sim.X[np.argmax(sim.U)], sim.Y[np.argmax(sim.U)],
-#   'g+', markersize=10)
-# cbar = plt.colorbar(field, format='%.0e')
-cbar = plt.colorbar(field)
-cbar.formatter.set_powerlimits((0, 0))
-ax1.set_xlabel(r'$x$')
-ax1.set_ylabel(r'$y$', rotation=0)
-if abs(f.xmax - 2*np.pi) < 1e-10:
-    ax1.set_xticks(np.linspace(0, f.xmax, 5),
-        ['0', r'$\pi/2$', r'$\pi$', r'$3\pi/2$', r'$2\pi$'])
-#  plt.xticks(np.linspace(0, 2*np.pi, 7),
-#      ['0',r'$\pi/3$',r'$2\pi/3$',r'$\pi$',r'$4\pi/3$',r'$5\pi/3$',r'$2\pi$'])
-else:
-    ax1.set_xticks(np.linspace(0, f.xmax, 6))
-ax1.margins(0,0)
+# ax1 = plt.subplot(121)
+# ax1.set_title('Final Solution')
+# field = ax1.tripcolor(sim.X, sim.Y, error, shading='gouraud'
+#                         ,cmap='seismic', vmin=vmin, vmax=vmax)
+# # field = ax1.tripcolor(sim.nodes[:,0], sim.nodes[:,1], sim.u - uExact
+# #                     ,shading='gouraud', cmap='seismic', vmin=vmin, vmax=vmax)
+# # field = ax1.tripcolor(sim.nodes[:,0], sim.nodes[:,1], sim.u, shading='gouraud')
+# # field = ax1.tripcolor(sim.X, sim.Y, sim.U, shading='gouraud')
+# # field = ax1.tripcolor(sim.X, sim.Y, exactSol, shading='gouraud')
+# # field = ax1.tripcolor(sim.X, sim.Y, f(np.vstack((sim.X,sim.Y)).T), shading='gouraud')
+# x = np.linspace(0, sim.nodeX[-1], 100)
+# if mapping.name == 'quadratic':
+#     startingPoints = [0.]
+# else:
+#     startingPoints = [0.4, 0.5, 0.6]
+# for yi in startingPoints:
+#     # try:
+#         ax1.plot(x, [sim.boundary.mapping(np.array([[0, yi]]), i) for i in x], 'k')
+#     # except:
+#     #     ax1.plot(x, [sim.boundary.mapping(np.array([[0, yi]]), i) % 1 for i in x], 'k')
+# # for xi in sim.nodeX:
+# #     ax1.plot([xi, xi], [0, 1], 'k:')
+# # ax.plot(sim.X[np.argmax(sim.U)], sim.Y[np.argmax(sim.U)],
+# #   'g+', markersize=10)
+# # cbar = plt.colorbar(field, format='%.0e')
+# cbar = plt.colorbar(field)
+# cbar.formatter.set_powerlimits((0, 0))
+# ax1.set_xlabel(r'$x$')
+# ax1.set_ylabel(r'$y$', rotation=0)
+# if abs(f.xmax - 2*np.pi) < 1e-10:
+#     ax1.set_xticks(np.linspace(0, f.xmax, 5),
+#         ['0', r'$\pi/2$', r'$\pi$', r'$3\pi/2$', r'$2\pi$'])
+# #  plt.xticks(np.linspace(0, 2*np.pi, 7),
+# #      ['0',r'$\pi/3$',r'$2\pi/3$',r'$\pi$',r'$4\pi/3$',r'$5\pi/3$',r'$2\pi$'])
+# else:
+#     ax1.set_xticks(np.linspace(0, f.xmax, 6))
+# ax1.margins(0,0)
 
-# plot the error convergence
-ax2 = plt.subplot(122)
-logN = np.log(NX_array)
-ax2.semilogy(logN, E_inf, '.-', label=r'$E_\infty$')
-ax2.semilogy(logN, E_2, '.-', label=r'$E_2$')
-# ax2.minorticks_off()
-ax2.set_xticks(logN, labels=NX_array)
-ax2.set_xlabel(r'$NX$')
-ax2.set_ylabel(r'Magnitude of Error Norm')
+# # plot the error convergence
+# ax2 = plt.subplot(122)
+# logN = np.log(NX_array)
+# ax2.semilogy(logN, E_inf, '.-', label=r'$E_\infty$')
+# ax2.semilogy(logN, E_2, '.-', label=r'$E_2$')
+# # ax2.minorticks_off()
+# ax2.set_xticks(logN, labels=NX_array)
+# ax2.set_xlabel(r'$NX$')
+# ax2.set_ylabel(r'Magnitude of Error Norm')
 
-# plot the intra-step order of convergence
-ax2R = ax2.twinx()
-logE_inf = np.log(E_inf)
-logE_2 = np.log(E_2)
-order_inf = (logE_inf[0:-1] - logE_inf[1:])/(logN[1:] - logN[0:-1])
-order_2 = (logE_2[0:-1] - logE_2[1:])/(logN[1:] - logN[0:-1])
-intraN = 0.5 * (logN[:-1] + logN[1:])
-ax2R.plot(intraN, order_inf, '.:', linewidth=1, label=r'$E_\infty$ order')
-ax2R.plot(intraN, order_2, '.:', linewidth=1, label=r'$E_2$ order')
-ax2R.axhline(2, linestyle=':', color='k', linewidth=1, label='Expected')
-ax2R.set_ylim(0, 5)
-ax2R.set_yticks(np.linspace(0,5,6))
-# ax2R.set_lim(0, 3)
-# ax2R.set_yticks([0, 0.5, 1, 1.5, 2, 2.5, 3])
-ax2R.set_ylabel(r'Intra-step Order of Convergence')
-ax2.legend()
-# lines, labels = ax1.get_legend_handles_labels()
+# # plot the intra-step order of convergence
+# ax2R = ax2.twinx()
+# logE_inf = np.log(E_inf)
+# logE_2 = np.log(E_2)
+# order_inf = (logE_inf[0:-1] - logE_inf[1:])/(logN[1:] - logN[0:-1])
+# order_2 = (logE_2[0:-1] - logE_2[1:])/(logN[1:] - logN[0:-1])
+# intraN = 0.5 * (logN[:-1] + logN[1:])
+# ax2R.plot(intraN, order_inf, '.:', linewidth=1, label=r'$E_\infty$ order')
+# ax2R.plot(intraN, order_2, '.:', linewidth=1, label=r'$E_2$ order')
+# ax2R.axhline(2, linestyle=':', color='k', linewidth=1, label='Expected')
+# ax2R.set_ylim(0, 5)
+# ax2R.set_yticks(np.linspace(0,5,6))
+# # ax2R.set_lim(0, 3)
+# # ax2R.set_yticks([0, 0.5, 1, 1.5, 2, 2.5, 3])
+# ax2R.set_ylabel(r'Intra-step Order of Convergence')
+# ax2.legend()
+# # lines, labels = ax1.get_legend_handles_labels()

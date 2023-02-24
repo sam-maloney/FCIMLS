@@ -63,18 +63,20 @@ f = sinXsinY()
 # f = linearPatch()
 # f = quadraticPatch()
 
-# mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
+mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
+# mapping = fcimls.mappings.QuadraticMapping(f.a, f.b)
 # mapping = fcimls.mappings.LinearMapping(1/f.xmax)
-mapping = fcimls.mappings.StraightMapping()
+# mapping = fcimls.mappings.StraightMapping()
 
-perturbation = 0.
+Nratio = 1
+perturbation = 0.1
 kwargs={
     'mapping' : mapping,
     # 'boundary' : ('Dirichlet', (1.5, f, None)),
     # # 'boundary' : ('periodic', 1.5),
     # 'basis' : 'linear',
-    'boundary' : ('Dirichlet', (2.5, f, None)),
-    # 'boundary' : ('periodic', 2.5),
+    # 'boundary' : ('Dirichlet', (3., f, Nratio*3)),
+    'boundary' : ('periodic', 2.5),
     'basis' : 'quadratic',
     'kernel' : 'cubic',
     'velocity' : np.array([0., 0.]),
@@ -87,7 +89,7 @@ kwargs={
 
 # allocate arrays for convergence testing
 start = 2
-stop = 7
+stop = 8
 nSamples = stop - start + 1
 NX_array = np.logspace(start, stop, num=nSamples, base=2, dtype='int32')
 E_inf = np.empty(nSamples, dtype='float64')
@@ -98,18 +100,24 @@ E_2 = np.empty(nSamples, dtype='float64')
 # therefore number of nodes equals (N+1)*(N+1)
 for iN, NX in enumerate(NX_array):
 
-    NY = NX
+    # NY = NX
+    NY = Nratio*NX
+    
+    # NQX = Nratio*3
+    NQX = 1
+    NQY = NY
+    Qord = 3
 
     # allocate arrays and compute grid
     sim = fcimls.FciMlsSim(NX, NY, **kwargs)
     sim.setInitialConditions(f)
-
+    
     print(f'NX = {NX},\tNY = {NY},\tnNodes = {sim.nNodes}')
 
 
     # Assemble the mass matrix and forcing term
     # sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationConservativeVCI
-    sim.computeSpatialDiscretization(f, NQX=1, NQY=NY, Qord=2, quadType='g',
+    sim.computeSpatialDiscretization(f, NQX=NQX, NQY=NQY, Qord=Qord, quadType='u',
                                      massLumping=False, vci=0)
     
     M, b = sim.boundary.modifyOperatorMatrix(sim.M, sim.b)
@@ -127,6 +135,19 @@ for iN, NX in enumerate(NX_array):
 
     print(f'max error = {E_inf[iN]}')
     print(f'L2 error  = {E_2[iN]}\n')
+    
+# print summary
+print(f'xmax = {f.xmax}, {mapping}')
+print(f'px = {kwargs["px"]}, py = {kwargs["py"]}, seed = {kwargs["seed"]}')
+print(f'basis = {sim.basis.name}, kernel = {sim.kernel.name}')
+print(f'boundary = {sim.boundary}')
+print(f'NQX = {NQX}, NQY = {NQY//NY}*NY, Qord = {Qord}')
+print(f'massLumping = {sim.massLumping}, quadType = {sim.quadType}')
+print(f'VCI: {sim.vci} using {sim.vci_solver}\n')
+with np.printoptions(formatter={'float': lambda x: format(x, '.8e')}):
+    print('E_2     =', repr(E_2))
+    print('E_inf   =', repr(E_inf))
+
 
 #%% Plotting
 
@@ -159,8 +180,12 @@ field = ax1.tripcolor(sim.X, sim.Y, error, shading='gouraud'
                      ,cmap='seismic', vmin=vmin, vmax=vmax
                      )
 x = np.linspace(0, sim.nodeX[-1], 100)
-for yi in [0.4, 0.5, 0.6]:
-    ax1.plot(x, [mapping(np.array([[0, yi]]), i) for i in x], 'k')
+if mapping.name == 'quadratic':
+    startingPoints = [0.]
+else:
+    startingPoints = [0.4, 0.5, 0.6]
+for yi in startingPoints:
+    ax1.plot(x, [sim.boundary.mapping(np.array([[0, yi]]), i) for i in x], 'k')
 # for xi in sim.nodeX:
 #     ax1.plot([xi, xi], [0, 1], 'k:')
 # ax.plot(sim.X[np.argmax(sim.U)], sim.Y[np.argmax(sim.U)],

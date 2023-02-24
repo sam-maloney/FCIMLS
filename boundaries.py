@@ -10,7 +10,6 @@ from abc import ABCMeta, abstractmethod
 from scipy.special import roots_legendre
 import numpy as np
 import scipy.sparse as sp
-# import warnings
 
 
 class Boundary(metaclass=ABCMeta):
@@ -27,9 +26,9 @@ class Boundary(metaclass=ABCMeta):
         self.sim = sim
         support = np.array(support).reshape(-1)
         uniformSpacing = np.array((sim.xmax/sim.NX, sim.ymax/sim.NY))
-        if len(support) == 1:
+        if support.size == 1:
             support = np.full(sim.ndim, support) * uniformSpacing
-        elif len(support) != sim.ndim:
+        elif support.size != sim.ndim:
             raise TypeError('support must be scalar or array_like of length ndim')
         self.support = support
         self.rsupport = 1./support
@@ -62,7 +61,7 @@ class Boundary(metaclass=ABCMeta):
 
     def dw(self, p):
         indices, displacements, distances = self.findNodesInSupport(p)
-        w = np.empty((len(indices), self.sim.ndim))
+        w = np.empty((indices.size, self.sim.ndim))
         dwdr = np.empty(w.shape)
         for i in range(self.sim.ndim):
             w[:,i], dwdr[:,i] = self.sim.kernel.dw(distances[:,i])
@@ -125,7 +124,7 @@ class PeriodicBoundary(Boundary):
             inds = np.flatnonzero(np.abs(dispY) < support[1]).astype('uint32')
             dispY = dispY[inds].reshape(-1,1)
             indices.append(inds + iPlane*self.sim.NY)
-            displacements.append(np.hstack((np.full((len(inds),1), dispX), dispY)))
+            displacements.append(np.hstack((np.full((inds.size,1), dispX), dispY)))
         # combine and return results
         indices = np.concatenate(indices)
         displacements = np.concatenate(displacements) * self.rsupport
@@ -140,7 +139,7 @@ class PeriodicBoundary(Boundary):
         dispY = np.vstack((disps[:,1], disps[:,1] + ymax, disps[:,1] - ymax))
         iX = np.abs(dispX).argmin(axis=0)
         iY = np.abs(dispY).argmin(axis=0)
-        n = len(inds)
+        n = inds.size
         disps[:,0] = dispX[(iX,np.arange(n))]
         disps[:,1] = dispY[(iY,np.arange(n))]
         return disps
@@ -160,6 +159,10 @@ class DirichletBoundary(Boundary):
     @property
     def name(self):
         return 'Dirichlet'
+    
+    def __repr__(self):
+        uniformSpacing = np.array((self.sim.xmax/self.sim.NX, self.sim.ymax/self.sim.NY))
+        return f'{self.__class__.__name__}(support = {self.support/uniformSpacing}, NDX = {self.NDX})'
 
     def __init__(self, sim, support, g, NDX=None):
         NX = sim.NX
@@ -170,16 +173,17 @@ class DirichletBoundary(Boundary):
         self.g = g
         self.B = sim.mapping.B
         super().__init__(sim, support)
-        if (NDX is None) or (NDX == 1):
+        if NDX in [None, 0, 1]:
+            self.NDX = None
             self.topNodeX = np.array(())
             self.bottomNodeX = self.topNodeX
-        elif isinstance(NDX, int):
-            if NDX < 2:
-                raise ValueError('NDX must be at least 2')
+        elif isinstance(NDX, int): # integer >1
             self.topNodeX = np.concatenate( [
                 np.arange(nodeX[i] + dx[i]/NDX, nodeX[i+1] - 0.5*dx[i]/NDX, dx[i]/NDX)
                 for i in range(NX) ] )
             self.bottomNodeX = self.topNodeX
+        else:
+            raise TypeError('NDX must None or an integer (and generally at least 2)')
         self.nBoundaryNodes = 2*(NY + NX) + \
             self.topNodeX.size + self.bottomNodeX.size
         self.nNodes = self.nBoundaryNodes + (NX - 1)*(NY - 1)
@@ -197,7 +201,9 @@ class DirichletBoundary(Boundary):
             # top boundary
             nodes[-self.topNodeX.size:,0] = self.topNodeX
             nodes[-self.topNodeX.size:,1] = self.sim.ymax
-        self.isBoundaryNode = ((nodes == 0.) | (nodes == 1.)).any(axis=1)
+        self.isBoundaryNode = ((nodes == 0.) | 
+            np.isclose(nodes[:,:1], self.sim.xmax) |
+            np.isclose(nodes[:,1:], self.sim.ymax)).any(axis=1)
         self.nodes = nodes
         return nodes
 
@@ -219,12 +225,12 @@ class DirichletBoundary(Boundary):
             inds = np.flatnonzero(np.abs(dispY) < support[1]).astype('uint32')
             dispY = dispY[inds].reshape(-1,1)
             indices.append(inds + iPlane*(NY + 1))
-            displacements.append(np.hstack((np.full((len(inds),1), dispX), dispY)))
+            displacements.append(np.hstack((np.full((inds.size,1), dispX), dispY)))
         # check additional nodes on bottom boundary
         dispX = p.flat[0] - self.bottomNodeX
         inds = np.flatnonzero(np.abs(dispX) < support[0]).astype('uint32')
         for i in inds:
-            dispY = float(self.mapping(p.ravel(), self.bottomNodeX[i])) - 0.
+            dispY = float(self.mapping(p.ravel(), self.bottomNodeX[i])) # - 0.
             if np.abs(dispY) < support[1]:
                 indices.append(np.array([i + NXY]))
                 displacements.append(np.array([[dispX[i], dispY]]))
@@ -255,10 +261,10 @@ class DirichletBoundary(Boundary):
         boundaryNodes = self.nodes[self.isBoundaryNode]
         for iN, node in enumerate(boundaryNodes):
             indices, phis = self.sim.phi(node)
-            nEntries = len(indices)
+            nEntries = indices.size
             data[index:index+nEntries] = phis
             row_ind[index:index+nEntries] = indices
-            col_ind[index:index+nEntries] = np.repeat(iN, nEntries)
+            col_ind[index:index+nEntries] = iN
             index += nEntries
         inds = np.flatnonzero(data.round(decimals=14,out=data))
         G = sp.csr_matrix( (data[inds], (row_ind[inds], col_ind[inds])),
@@ -310,13 +316,13 @@ class DirichletBoundary(Boundary):
             # Left boundary
             inds, phis, gradphis = self.sim.dphi(np.array((0, quad)))
             # Operator matrix contributions
-            nEntries = len(inds)**2
+            nEntries = inds.size**2
             Kdata[index:index+nEntries] = quadWeight * \
                 np.ravel( np.outer(phis, diffusivity[0] @ gradphis.T) )
             Adata[index:index+nEntries] = quadWeight * \
                 np.ravel( np.outer(phis,  velocity[0] * phis) )
-            row_ind[index:index+nEntries] = np.repeat(inds, len(inds))
-            col_ind[index:index+nEntries] = np.tile(inds, len(inds))
+            row_ind[index:index+nEntries] = np.repeat(inds, inds.size)
+            col_ind[index:index+nEntries] = np.tile(inds, inds.size)
             index += nEntries
             # VCI residuals
             phiSums[inds,0] -= phis * quadWeight
@@ -326,13 +332,13 @@ class DirichletBoundary(Boundary):
             # Right boundary
             inds, phis, gradphis = self.sim.dphi(np.array((xmax, quad)))
             # Operator matrix contributions
-            nEntries = len(inds)**2
+            nEntries = inds.size**2
             Kdata[index:index+nEntries] = quadWeight * \
                 np.ravel( np.outer(phis, -diffusivity[0] @ gradphis.T) )
             Adata[index:index+nEntries] = quadWeight * \
                 np.ravel( np.outer(phis,  -velocity[0] * phis) )
-            row_ind[index:index+nEntries] = np.repeat(inds, len(inds))
-            col_ind[index:index+nEntries] = np.tile(inds, len(inds))
+            row_ind[index:index+nEntries] = np.repeat(inds, inds.size)
+            col_ind[index:index+nEntries] = np.tile(inds, inds.size)
             index += nEntries
             # VCI residuals
             phiSums[inds,0] += phis * quadWeight
@@ -350,13 +356,13 @@ class DirichletBoundary(Boundary):
                 # Bottom boundary
                 inds, phis, gradphis = self.sim.dphi(np.array((quad, 0)))
                 # Operator matrix contributions
-                nEntries = len(inds)**2
+                nEntries = inds.size**2
                 Kdata[index:index+nEntries] = quadWeight * \
                     np.ravel( np.outer(phis, diffusivity[1] @ gradphis.T) )
                 Adata[index:index+nEntries] = quadWeight * \
                     np.ravel( np.outer(phis,  velocity[1] * phis) )
-                row_ind[index:index+nEntries] = np.repeat(inds, len(inds))
-                col_ind[index:index+nEntries] = np.tile(inds, len(inds))
+                row_ind[index:index+nEntries] = np.repeat(inds, inds.size)
+                col_ind[index:index+nEntries] = np.tile(inds, inds.size)
                 index += nEntries
                 # VCI residuals
                 phiSums[inds,1] -= phis * quadWeight
@@ -366,13 +372,13 @@ class DirichletBoundary(Boundary):
                 # Top boundary
                 inds, phis, gradphis = self.sim.dphi(np.array((quad, ymax)))
                 # Operator matrix contributions
-                nEntries = len(inds)**2
+                nEntries = inds.size**2
                 Kdata[index:index+nEntries] = quadWeight * \
                     np.ravel( np.outer(phis, -diffusivity[1] @ gradphis.T) )
                 Adata[index:index+nEntries] = quadWeight * \
                     np.ravel( np.outer(phis,  -velocity[1] * phis) )
-                row_ind[index:index+nEntries] = np.repeat(inds, len(inds))
-                col_ind[index:index+nEntries] = np.tile(inds, len(inds))
+                row_ind[index:index+nEntries] = np.repeat(inds, inds.size)
+                col_ind[index:index+nEntries] = np.tile(inds, inds.size)
                 index += nEntries
                 # VCI residuals
                 phiSums[inds,1] += phis * quadWeight
