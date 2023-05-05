@@ -127,7 +127,7 @@ NY.append(8)
 #        2.47328472e-03, 4.55351099e-04, 8.58986774e-05]))
 # E_inf.append(np.array([1.15697486e+01, 6.40099115e+00, 8.48972481e-01, 7.51296999e-02,
 #        1.13340149e-02, 2.39105291e-03, 3.65807720e-04]))
-# labels.append('unaligned 1:1')
+# labels.append(r'unaligned \ratio{1}{1}')
 # NX.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
 # NY.append(1)
 
@@ -136,7 +136,7 @@ E_2.append(np.array([4.50816969e+00, 4.35767178e+00, 2.27755332e-01, 5.66164282e
        1.30324143e-03, 1.92936997e-04, 2.43886935e-05]))
 E_inf.append(np.array([1.12285705e+01, 1.16367501e+01, 8.02927946e-01, 2.25277766e-02,
        8.54735061e-03, 1.13792309e-03, 1.56774456e-04]))
-labels.append('aligned 1:1')
+labels.append(r'aligned \ratio{1}{1}')
 NX.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
 NY.append(1)
 
@@ -145,7 +145,7 @@ E_2.append(np.array([9.79455032e-01, 5.40716549e-03, 1.27020551e-03, 1.80888643e
         2.57871979e-05, 3.30007431e-06]))
 E_inf.append(np.array([2.81602177e+00, 1.75729625e-02, 5.68631075e-03, 1.13147280e-03,
         1.65057532e-04, 2.42178172e-05]))
-labels.append('aligned 1:4')
+labels.append(r'aligned \ratio{1}{4}')
 NX.append(np.array([  4,   8,  16,  32,  64, 128]))
 NY.append(4)
 
@@ -154,7 +154,7 @@ E_2.append(np.array([4.82169629e-02, 1.71950170e-03, 2.92268704e-04, 4.33212514e
        6.52183947e-06]))
 E_inf.append(np.array([1.84738650e-01, 6.73128239e-03, 1.46019883e-03, 1.98598135e-04,
        3.82148971e-05]))
-labels.append('aligned 1:8')
+labels.append(r'aligned \ratio{1}{8}')
 NX.append(np.array([ 4,  8, 16, 32, 64]))
 NY.append(8)
 
@@ -169,7 +169,18 @@ plt.rc('markers', fillstyle='full')
 plt.rc('lines', markersize=5.0)
 plt.rc('pdf', fonttype=42)
 plt.rc('text', usetex=True)
-plt.rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
+plt.rc('text.latex', preamble=r'\usepackage[T1]{fontenc}'
+                                r'\usepackage[osf,largesc]{newpxtext}'
+                                # r'\usepackage[osf,nohelv,largesc]{newpxtext}'
+                                r'\usepackage[euler-digits]{eulervm}'
+                                # r'\usepackage{eulerpx}'
+                                # r'\usepackage[sans]{libertinus}'
+                                r'\usepackage{classico}'
+                                r'\usepackage{mathtools}'
+                                r'\newcommand*{\ratio}[2]{\ensuremath{#1\mathop{:}#2}}'
+                                )
+plt.rc('font', family='sans-serif')
+# plt.rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
 # fontsize : int or {'xx-small', 'x-small', 'small', 'medium', 'large', 'x-large', 'xx-large'}
 # plt.rc('font', size='small')
 plt.rc('legend', fontsize='small')

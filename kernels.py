@@ -36,7 +36,7 @@ GenericSpline : Kernel
 Gaussian : Kernel
     .. math:: w(r) = \\frac{\\exp(-9r^2) - \\exp(-9)}{1 - \\exp(-9)}
 Bump : Kernel
-    .. math:: w(r) = \\exp(\\frac{-1}{1 - r^2})
+    .. math:: w(r) = \\exp(\\frac{r^2}{r^2 - 1})
 """
 
 from abc import ABCMeta, abstractmethod
@@ -494,7 +494,8 @@ class Bump(Kernel):
         i0 = r < 1
         w = np.zeros(r.size)
         if i0.any():
-            w[i0] = np.exp(1 - 1/(1 - r[i0]**2))
+            r2 = r[i0]**2
+            w[i0] = np.exp(r2/(r2 - 1))
         return w
 
     def dw(self, r):
@@ -503,7 +504,7 @@ class Bump(Kernel):
         dwdr = w.copy()
         if i0.any():
             r1 = r[i0]; r2 = r1**2
-            tmp = -1/(1 - r2)
+            tmp = 1/(r2 - 1)
             w[i0] = np.exp(tmp + 1)
             dwdr[i0] = w[i0]*(-2*r1)*tmp**2
         return w, dwdr
@@ -515,7 +516,7 @@ class Bump(Kernel):
         d2wdr2 = w.copy()
         if i0.any():
             r1 = r[i0]; r2 = r1**2
-            tmp1 = -1/(1 - r2)
+            tmp1 = 1/(r2 - 1)
             w[i0] = np.exp(tmp1 + 1)
             tmp2 = tmp1**2
             dwdr[i0] = w[i0]*(-2*r1)*tmp2

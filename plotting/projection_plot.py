@@ -37,7 +37,7 @@ E_2_L.append(np.array([4.65999900e-02, 5.94109035e-05, 1.43721487e-05, 1.0988632
         7.19851610e-08, 4.55145122e-09, 2.85286805e-10]))
 E_inf_L.append(np.array([6.11559661e-02, 1.18821807e-04, 2.87442974e-05, 2.19772644e-06,
         1.43970328e-07, 9.10290621e-09, 5.70569592e-10]))
-labels_L.append('uniform str, Q3g')
+labels_L.append(r'uniform str, Q3g')
 NX_L.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
 NY_L.append(1)
 
@@ -46,7 +46,7 @@ E_2_L.append(np.array([8.32524772e-02, 7.26433188e-03, 1.61502000e-04, 1.5348457
         1.32226095e-06, 9.04133067e-08, 5.78855878e-09]))
 E_inf_L.append(np.array([1.61216413e-01, 1.35052380e-02, 3.31961002e-04, 3.91859526e-05,
         3.52978262e-06, 2.44894619e-07, 1.57024289e-08]))
-labels_L.append('uniform sin, Q3g')
+labels_L.append(r'uniform sin, Q3g')
 NX_L.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
 NY_L.append(1)
 
@@ -55,7 +55,7 @@ E_2_L.append(np.array([4.20261832e-02, 2.81755319e-03, 4.10473462e-04, 6.2577694
        7.79852079e-06, 9.80107779e-07, 1.28408789e-07]))
 E_inf_L.append(np.array([7.68510229e-02, 6.25620176e-03, 1.23054151e-03, 2.28754608e-04,
        3.38327122e-05, 4.41788719e-06, 6.28913255e-07]))
-labels_L.append(r'10\% pert.  str, Q3g')
+labels_L.append(r'\percent{10} pert.  str, Q3g')
 NX_L.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
 NY_L.append(1)
 
@@ -64,7 +64,7 @@ E_2_L.append(np.array([9.75924522e-02, 9.10705558e-03, 1.55401755e-03, 2.4652464
        3.17185188e-05, 4.09622569e-06, 5.65889782e-07]))
 E_inf_L.append(np.array([1.87602041e-01, 2.55664716e-02, 5.10593428e-03, 8.68615593e-04,
        1.42100620e-04, 2.15754215e-05, 3.02108332e-06]))
-labels_L.append(r'10\% pert.  sin, Q3g')
+labels_L.append(r'\percent{10} pert.  sin, Q3g')
 NX_L.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
 NY_L.append(1)
 
@@ -76,7 +76,7 @@ NY_L.append(1)
 #        3.22430995e-05, 4.14427815e-06, 5.73999051e-07]))
 # E_inf_L.append(np.array([1.80413889e-01, 2.58976844e-02, 5.07037162e-03, 8.70739581e-04,
 #        1.41066198e-04, 2.16990192e-05, 2.92921867e-06]))
-# labels_L.append(r'10\% pert.  sin, Q3u')
+# labels_L.append(r'\percent{10} pert.  sin, Q3u')
 # NX_L.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
 # NY_L.append(1)
 
@@ -88,7 +88,7 @@ NY_L.append(1)
 #        1.43999113e-06, 9.76399920e-08, 6.23948541e-09]))
 # E_inf_L.append(np.array([1.57443654e-01, 1.30741566e-02, 3.14908437e-04, 4.22169159e-05,
 #        3.69630590e-06, 2.52765809e-07, 1.61459307e-08]))
-# labels_L.append('uniform sin, Q4u')
+# labels_L.append(r'uniform sin, Q4u')
 # NX_L.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
 # NY_L.append(1)
 
@@ -97,7 +97,7 @@ NY_L.append(1)
 #         3.22469015e-05, 4.14348923e-06, 5.75092035e-07]))
 # E_inf_L.append(np.array([1.80747303e-01, 2.55861767e-02, 5.16201464e-03, 8.71502587e-04,
 #         1.40252799e-04, 2.17092059e-05, 2.94970639e-06]))
-# labels_L.append(r'10\% pert.  sin, Q4u')
+# labels_L.append(r'\percent{10} pert.  sin, Q4u')
 # NX_L.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
 # NY_L.append(1)
 
@@ -119,7 +119,7 @@ E_2_R.append(np.array([2.35142926e-01, 1.82443837e-02, 1.36899798e-03, 1.7105963
        1.57778638e-05, 1.41319139e-06, 1.25336452e-07]))
 E_inf_R.append(np.array([8.92557643e-01, 1.00563790e-01, 9.99520056e-03, 1.47779970e-03,
        1.90233726e-04, 3.30875242e-05, 4.60217619e-06]))
-labels_R.append('uniform 1:1, NDX=2')
+labels_R.append(r'uniform \ratio{1}{1}, $\text{NDX}=2$')
 NX_R.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
 NY_R.append(1)
 
@@ -128,7 +128,7 @@ E_2_R.append(np.array([1.63872925e-01, 1.81152275e-02, 1.07937196e-03, 1.4678314
        1.17115318e-05, 9.77800513e-07, 8.45481427e-08]))
 E_inf_R.append(np.array([5.72562375e-01, 1.07986010e-01, 6.42286228e-03, 1.16829344e-03,
        1.15581208e-04, 1.32643729e-05, 1.72208848e-06]))
-labels_R.append('uniform 1:1, NDX=3')
+labels_R.append(r'uniform \ratio{1}{1}, $\text{NDX}=3$')
 NX_R.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
 NY_R.append(1)
 
@@ -142,7 +142,19 @@ plt.rc('markers', fillstyle='full')
 plt.rc('lines', markersize=5.0, linewidth=solid_linewidth)
 plt.rc('pdf', fonttype=42)
 plt.rc('text', usetex=True)
-plt.rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
+plt.rc('text.latex', preamble=r'\usepackage[T1]{fontenc}'
+                                r'\usepackage[osf,largesc]{newpxtext}'
+                                # r'\usepackage[osf,nohelv,largesc]{newpxtext}'
+                                r'\usepackage[euler-digits]{eulervm}'
+                                # r'\usepackage{eulerpx}'
+                                # r'\usepackage[sans]{libertinus}'
+                                r'\usepackage{classico}'
+                                r'\usepackage{mathtools}'
+                                r'\newcommand*{\ratio}[2]{\ensuremath{#1\mathop{:}#2}}'
+                                r'\newcommand*{\percent}[1]{\ensuremath{#1\,\%}}'
+                                )
+plt.rc('font', family='sans-serif')
+# plt.rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
 # fontsize : int or {'xx-small', 'x-small', 'small', 'medium', 'large', 'x-large', 'xx-large'}
 # plt.rc('font', size='small')
 plt.rc('legend', fontsize='small')
