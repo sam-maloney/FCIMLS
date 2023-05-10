@@ -58,9 +58,9 @@ class quadraticPatch:
         y = p.reshape(-1,2)[:,1]
         return 0.5 + 0.1*x + 0.8*y + 1.2*x*y + 0.8*x*x + 0.6*y*y
 
-f = sinXsinY()
+# f = sinXsinY()
 # f = QuadraticTestProblem()
-# f = linearPatch()
+f = linearPatch()
 # f = quadraticPatch()
 
 mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
@@ -72,12 +72,12 @@ Nratio = 1
 perturbation = 0.1
 kwargs={
     'mapping' : mapping,
-    # 'boundary' : ('Dirichlet', (1.5, f, None)),
-    # # 'boundary' : ('periodic', 1.5),
-    # 'basis' : 'linear',
-    # 'boundary' : ('Dirichlet', (3., f, Nratio*3)),
-    'boundary' : ('periodic', 2.5),
-    'basis' : 'quadratic',
+    'boundary' : ('Dirichlet', (1.5, f, None)),
+    # 'boundary' : ('periodic', 1.5),
+    'basis' : 'linear',
+    # # 'boundary' : ('Dirichlet', (3., f, Nratio*3)),
+    # 'boundary' : ('periodic', 2.5),
+    # 'basis' : 'quadratic',
     'kernel' : 'cubic',
     'velocity' : np.array([0., 0.]),
     'diffusivity' : 1., # Makes diffusivity matrix K into Poisson operator
@@ -88,8 +88,8 @@ kwargs={
     'ymax' : f.ymax }
 
 # allocate arrays for convergence testing
-start = 2
-stop = 8
+start = 4
+stop = 4
 nSamples = stop - start + 1
 NX_array = np.logspace(start, stop, num=nSamples, base=2, dtype='int32')
 E_inf = np.empty(nSamples, dtype='float64')
@@ -106,7 +106,7 @@ for iN, NX in enumerate(NX_array):
     # NQX = Nratio*3
     NQX = 1
     NQY = NY
-    Qord = 3
+    Qord = 2
 
     # allocate arrays and compute grid
     sim = fcimls.FciMlsSim(NX, NY, **kwargs)
@@ -120,11 +120,29 @@ for iN, NX in enumerate(NX_array):
     sim.computeSpatialDiscretization(f, NQX=NQX, NQY=NQY, Qord=Qord, quadType='u',
                                      massLumping=False, vci=0)
     
+    # enforce boundaries with Lagrange multipliers
     M, b = sim.boundary.modifyOperatorMatrix(sim.M, sim.b)
     uI = sp_la.spsolve(M, b)
     sim.uI = uI[:sim.nNodes]
     
+    # # Sets all nodes on boundaries via strong-form co-location
+    # for n, node in enumerate(sim.nodes):
+    #     if (node.prod() == 0) or (node[0] == f.xmax) or (node[1] == f.ymax):
+    #         inds, phis = sim.phi(node)
+    #         # sim.M.data[sim.M.indptr[n]:sim.M.indptr[n+1]] = 0.
+    #         sim.M[n,inds] = phis
+    #         sim.b[n] = f(node)
     # sim.uI = sp_la.spsolve(sim.M, sim.b)
+    
+    # ##### strong form colocation at all nodes #####
+    # sim.M.data[:] = 0
+    # for n, node in enumerate(sim.nodes):
+    #     inds, phis = sim.phi(node)
+    #     # sim.M.data[sim.M.indptr[n]:sim.M.indptr[n+1]] = 0.
+    #     sim.M[n,inds] = phis
+    #     sim.b[n] = f(node)
+    # sim.uI = sp_la.spsolve(sim.M, sim.b)
+    
     sim.solve()
 
     # compute the analytic solution and error norms

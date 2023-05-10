@@ -309,6 +309,7 @@ class FciMlsSim:
         #     compute the moment matrix A(x)
         # --------------------------------------
         indices, w, displacements = self.boundary.w(point)
+        displacements = self.boundary.computeDisplacements(point, indices) * self.boundary.rsupport
         p = self.basis(displacements)
         A = w*p.T@p
         # --------------------------------------
@@ -370,12 +371,13 @@ class FciMlsSim:
         #     compute the moment matrix A(x)
         # --------------------------------------
         indices, w, gradw, displacements = self.boundary.dw(point)
+        displacements = self.boundary.computeDisplacements(point, indices) * self.boundary.rsupport
         p = self.basis(displacements)
         dp = self.basis.dp(displacements) * \
-             self.boundary.rsupport.reshape(self.ndim,-1)
+              self.boundary.rsupport.reshape(self.ndim,-1)
         # re-align gradients to global x-coordinate
         gradw[:,0] -= self.mapping.deriv(point)*gradw[:,1]
-        dp[:,0] -= self.mapping.deriv(point)*dp[:,1]
+        # dp[:,0] -= self.mapping.deriv(point)*dp[:,1]
         wp = w*p.T
         A = wp@p
         dA = [gradw[:,i]*p.T@p + dp[:,i].T@wp.T + wp@dp[:,i]
@@ -464,6 +466,7 @@ class FciMlsSim:
         """
         raise NotImplementedError
         # TODO: re-align grad2w to global x-coordinate
+        # This is standard MLS (Nguyen2008), centred-and-scaled not started
         # --------------------------------------
         #     compute the moment matrix A(x)
         # --------------------------------------
@@ -625,6 +628,10 @@ class FciMlsSim:
         self.NQY = NQY
         self.Qord = Qord
         self.massLumping = massLumping
+        if quadType.lower()[0] == 'g':
+            self.quadType = quadType = 'Gauss-Legendre'
+        elif quadType.lower()[0] == 'u':
+            self.quadType = quadType = 'uniform'
         # pre-allocate arrays for operator matrix triplets
         nQuads = NX * NQX * NQY * Qord**2
         self.nQuads = nQuads
@@ -660,11 +667,9 @@ class FciMlsSim:
         for iPlane in range(NX):
             dx = self.dx[iPlane]
             ##### generate quadrature points
-            if quadType.lower()[0] == 'g':
-                self.quadType = 'Gauss-Legendre'
+            if quadType == 'Gauss-Legendre':
                 offsets, weights = roots_legendre(Qord)
-            elif quadType.lower()[0] == 'u':
-                self.quadType = 'uniform'
+            elif quadType == 'uniform':
                 offsets = np.arange(1/Qord - 1, 1, 2/Qord)
                 weights = np.full(Qord, 2/Qord)
             offsets = (offsets * dx * 0.5 / NQX, offsets * 0.5 / NQY)
@@ -819,6 +824,10 @@ class FciMlsSim:
         self.NQY = NQY
         self.Qord = Qord
         self.massLumping = massLumping
+        if quadType.lower()[0] == 'g':
+            self.quadType = quadType = 'Gauss-Legendre'
+        elif quadType.lower()[0] == 'u':
+            self.quadType = quadType = 'uniform'
         # pre-allocate arrays for operator matrix triplets
         nQuadsPerPlane = NQX * NQY * Qord**2
         nQuads = nQuadsPerPlane * NX
@@ -863,11 +872,9 @@ class FciMlsSim:
         for iPlane in range(NX):
             dx = self.dx[iPlane]
             ##### generate quadrature points
-            if quadType.lower()[0] == 'g':
-                self.quadType = 'Gauss-Legendre'
+            if quadType == 'Gauss-Legendre':
                 offsets, weights = roots_legendre(Qord)
-            elif quadType.lower()[0] == 'u':
-                self.quadType = 'uniform'
+            elif quadType == 'uniform':
                 offsets = np.arange(1/Qord - 1, 1, 2/Qord)
                 weights = np.full(Qord, 2/Qord)
             offsets = (offsets * dx * 0.5 / NQX, offsets * 0.5 / NQY)
@@ -889,9 +896,9 @@ class FciMlsSim:
                 nInds = inds.size
                 nEntries = 2*nInds
                 gd[index:index+nEntries] = gradphis.T.ravel()
+                ci[index:index+nEntries] = iQ + iPlane*nQuadsPerPlane
                 ri[index:index+nInds] = inds
                 ri[index+nInds:index+nEntries] = inds + nNodes
-                ci[index:index+nConstraintsPerNode*nInds] = iQ + iPlane*nQuadsPerPlane
                 index += nEntries
 
                 quadWeight = quadWeights[iQ]
@@ -908,6 +915,7 @@ class FciMlsSim:
                     storage.append((quad, inds, phis, gradphis, rDisps))
                     nEntries = 4*nInds
                     gd[index:index+nEntries] = rDisps.T.ravel()
+                    ci[index:index+nEntries] = iQ + iPlane*nQuadsPerPlane
                     ri[index:index+nInds] = inds + 2*nNodes
                     ri[index+nInds:index+2*nInds] = inds + 3*nNodes
                     ri[index+2*nInds:index+3*nInds] = inds + 4*nNodes
@@ -916,7 +924,7 @@ class FciMlsSim:
                 
             quadWeightsList.append(quadWeights)
 
-        # Add final constraint that sum of weights equal domain area
+        # Add final constraint that sum of weights doesn't change
         nConstraints += 1
         self.nConstraints = nConstraints
         gd[index:index + nQuads] = 1.0
@@ -931,7 +939,7 @@ class FciMlsSim:
         G._shape = (nConstraints, nQuads)
         del gd, ci, ri, offsets, weights, quads
         start_time = default_timer()
-        # ### solve for quadWeights directly (does not work as well!)
+        # ### solve for quadWeights directly (doesn't work as well!)
         # rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
         # quadWeights = ssqr.min2norm(G, rhs).ravel()
         ### solve for corrections to quadWeights
@@ -990,7 +998,8 @@ class FciMlsSim:
         # quadWeights += quadWeightCorrections[0]
         # print(f'xi solve time = {default_timer()-start_time} s')
         
-        del G, rhs, quadWeightsList
+        self.G = G
+        # del G, rhs, quadWeightsList
         try:
             del quadWeightCorrections
         except:

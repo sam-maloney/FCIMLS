@@ -301,9 +301,9 @@ class DirichletBoundary(Boundary):
         elif vci == 2:
             integrals = np.zeros((nNodes, ndim, 3))
             phiSums = integrals[:,:,0]
-        if quadType.lower() in ('gauss', 'g', 'gaussian'):
+        if quadType.lower()[0] == 'g':
             offsets, weights = roots_legendre(Qord)
-        elif quadType.lower() in ('uniform', 'u'):
+        elif quadType.lower()[0] == 'u':
             offsets = np.arange(1/Qord - 1, 1, 2/Qord)
             weights = np.full(Qord, 2/Qord)
         # Left/Right boundaries

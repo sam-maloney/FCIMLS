@@ -118,6 +118,10 @@ class linearPatch:
     xmax = 1.
     ymax = 1.
     umax = 1.
+    
+    b = 0.05
+    # define a such that (0, 0) maps to (xmax, 1) for given b and xmax
+    a = (1 - b*xmax)/xmax**2
 
     def __call__(self, p):
         nPoints = p.size // 2
@@ -135,6 +139,10 @@ class quadraticPatch:
     umax = 1.
     xx = 0.8
     yy = 0.6
+    
+    b = 0.05
+    # define a such that (0, 0) maps to (xmax, 1) for given b and xmax
+    a = (1 - b*xmax)/xmax**2
 
     def __call__(self, p):
         nPoints = p.size // 2
@@ -146,29 +154,30 @@ class quadraticPatch:
         return 0.5 + 0.1*x + 0.8*y + 1.2*x*y + self.xx*x*x + self.yy*y*y
 
 # f = QuadraticTestProblem()
-f = slantedTestProblem()
+# f = slantedTestProblem()
 # f = simplifiedSlantProblem()
 # f = sinXsinY()
 # f = linearPatch()
-# f = quadraticPatch()
+f = quadraticPatch()
 
 # mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
 # mapping = fcimls.mappings.QuadraticMapping(f.a, f.b)
-mapping = fcimls.mappings.LinearMapping(1/f.xmax)
-# mapping = fcimls.mappings.StraightMapping()
+# mapping = fcimls.mappings.LinearMapping(1/f.xmax)
+mapping = fcimls.mappings.StraightMapping()
 
-perturbation = 0.1
+perturbation = 0.0
 kwargs={
     'mapping' : mapping,
     # 'boundary' : ('Dirichlet', (1.5, f.solution, None)),
     # # 'boundary' : ('periodic', 1.5),
     # 'basis' : 'linear',
-    # 'boundary' : ('Dirichlet', (2.89, f.solution, 1)),
-    'boundary' : ('periodic', 2.5),
+    'boundary' : ('Dirichlet', (2.5, f.solution, 1)),
+    # 'boundary' : ('periodic', 2.5),
     'basis' : 'quadratic',
     'kernel' : 'cubic',
     # 'kernel' : 'quartic',
     # 'kernel' : 'quintic',
+    # 'kernel' : 'bump',
     'velocity' : np.array([0., 0.]),
     'diffusivity' : 1., # Makes diffusivity matrix K into Poisson operator
     'px' : perturbation,
@@ -178,8 +187,8 @@ kwargs={
     'ymax' : f.ymax }
 
 # allocate arrays for convergence testing
-start = 2
-stop = 6
+start = 3
+stop = 3
 nSamples = np.rint(stop - start + 1).astype('int')
 NX_array = np.logspace(start, stop, num=nSamples, base=2, dtype='int')
 E_inf = np.empty(nSamples)
@@ -197,7 +206,7 @@ for iN, NX in enumerate(NX_array):
 
     start_time = default_timer()
 
-    Nratio = 16
+    Nratio = 1
 
     NY = NX*Nratio
     # NX = 16
@@ -205,7 +214,7 @@ for iN, NX in enumerate(NX_array):
     # NQX = Nratio // 2
     NQX = 1
     NQY = NY
-    Qord = 5
+    Qord = 3
 
     ##### allocate arrays and compute grid
     sim = fcimls.FciMlsSim(NX, NY, **kwargs)
@@ -306,10 +315,12 @@ print(f'NQX = {NQX}, NQY = {NQY//NY}*NY, Qord = {Qord}')
 print(f'massLumping = {sim.massLumping}, quadType = {sim.quadType}')
 print(f'VCI: {sim.vci} using {sim.vci_solver}\n')
 with np.printoptions(formatter={'float': lambda x: format(x, '.8e')}):
-    print('E_2     =', repr(E_2))
-    print('E_inf   =', repr(E_inf))
-    print('t_setup =', repr(t_setup))
-    print('t_solve =', repr(t_solve))
+    # print('E_2     =', repr(E_2))
+    # print('E_inf   =', repr(E_inf))
+    # print('t_setup =', repr(t_setup))
+    # print('t_solve =', repr(t_solve))
+    print(E_2[0])
+    print(E_inf[0])
 
 
 # #%% Plotting
