@@ -117,7 +117,7 @@ class sinXsinY:
 class linearPatch:
     xmax = 1.
     ymax = 1.
-    umax = 1.
+    umax = xmax + 2*ymax
     
     b = 0.05
     # define a such that (0, 0) maps to (xmax, 1) for given b and xmax
@@ -136,9 +136,11 @@ class linearPatch:
 class quadraticPatch:
     xmax = 1.
     ymax = 1.
-    umax = 1.
+
     xx = 0.8
     yy = 0.6
+    
+    umax = 0.5 + 0.1*xmax + 0.8*ymax + 1.2*xmax*ymax + xx*xmax*xmax + yy*ymax*ymax
     
     b = 0.05
     # define a such that (0, 0) maps to (xmax, 1) for given b and xmax
@@ -165,7 +167,7 @@ f = quadraticPatch()
 # mapping = fcimls.mappings.LinearMapping(1/f.xmax)
 mapping = fcimls.mappings.StraightMapping()
 
-perturbation = 0.0
+perturbation = 0.1
 kwargs={
     'mapping' : mapping,
     # 'boundary' : ('Dirichlet', (1.5, f.solution, None)),
@@ -233,6 +235,7 @@ for iN, NX in enumerate(NX_array):
     print(f'NX = {NX},\tNY = {NY},\tnNodes = {sim.nNodes}')
 
     ##### Assemble the mass matrix and forcing term
+    # sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationConservativeVCI6
     sim.computeSpatialDiscretization = sim.computeSpatialDiscretizationConservativeVCI
     sim.computeSpatialDiscretization(f, NQX=NQX, NQY=NQY, Qord=Qord, quadType='u',
                                      massLumping=False, vci=2)
@@ -311,16 +314,16 @@ print(f'xmax = {f.xmax}, {mapping}')
 print(f'px = {kwargs["px"]}, py = {kwargs["py"]}, seed = {kwargs["seed"]}')
 print(f'basis = {sim.basis.name}, kernel = {sim.kernel.name}')
 print(f'boundary = {sim.boundary}')
-print(f'NQX = {NQX}, NQY = {NQY//NY}*NY, Qord = {Qord}')
-print(f'massLumping = {sim.massLumping}, quadType = {sim.quadType}')
+print(f'NQX = {NQX}, NQY = {NQY//NY}*NY, massLumping = {sim.massLumping}')
+print(f'Qord = {Qord}, quadType = {sim.quadType}')
 print(f'VCI: {sim.vci} using {sim.vci_solver}\n')
 with np.printoptions(formatter={'float': lambda x: format(x, '.8e')}):
-    # print('E_2     =', repr(E_2))
-    # print('E_inf   =', repr(E_inf))
-    # print('t_setup =', repr(t_setup))
-    # print('t_solve =', repr(t_solve))
-    print(E_2[0])
-    print(E_inf[0])
+    print('E_2     =', repr(E_2))
+    print('E_inf   =', repr(E_inf))
+    print('t_setup =', repr(t_setup))
+    print('t_solve =', repr(t_solve))
+    # print(E_2[0])
+    # print(E_inf[0])
 
 
 # #%% Plotting

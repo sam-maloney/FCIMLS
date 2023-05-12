@@ -848,6 +848,290 @@ class FciMlsSim:
         if vci == 1:
             nConstraintsPerNode = 2
         elif vci == 2:
+            nConstraintsPerNode = 5
+        nConstraints = nConstraintsPerNode * nNodes
+        if nQuads < nConstraints:
+            print('Warning: less quadrature points than VCI constraints')
+        nMaxEntries = int(nQuads * (nConstraints * self.boundary.volume + 1))
+        gd = np.empty(nMaxEntries)
+        ri = np.empty(nMaxEntries, dtype='int')
+        ci = np.empty(nMaxEntries, dtype='int')
+
+        vciBints, opMatBints = self.boundary.computeBoundaryIntegrals(vci)
+        if vci == 1:
+            self.gradphiSumsOld = vciBints.copy()
+            self.gradphiSumsNew = self.gradphiSumsOld.copy()
+        elif vci == 2:
+            self.rOld = np.empty((nNodes, nConstraintsPerNode))
+            self.rOld[:,:2] = vciBints[:,:,0]
+            self.rOld[:,2] = vciBints[:,0,1]
+            self.rOld[:,3] = vciBints[:,1,2]
+            self.rOld[:,4] = vciBints[:,0,2] + vciBints[:,1,1]
+            self.rNew = self.rOld.copy()
+            self.gradphiSumsOld = self.rOld[:,:2]
+            self.gradphiSumsNew = self.rNew[:,:2]
+
+        ##### compute spatial discretizaton
+        index = 0
+        for iPlane in range(NX):
+            dx = self.dx[iPlane]
+            ##### generate quadrature points
+            if quadType == 'Gauss-Legendre':
+                offsets, weights = roots_legendre(Qord)
+            elif quadType == 'uniform':
+                offsets = np.arange(1/Qord - 1, 1, 2/Qord)
+                weights = np.full(Qord, 2/Qord)
+            offsets = (offsets * dx * 0.5 / NQX, offsets * 0.5 / NQY)
+            weights = (weights * dx * 0.5 / NQX, weights * 0.5 / NQY)
+            quads = ( np.indices([NQX, NQY], dtype='float').T.
+                      reshape(-1, ndim) + 0.5 ) * [dx/NQX, 1/NQY]
+            quadWeights = np.ones(len(quads))
+            for i in range(ndim):
+                quads = np.concatenate(
+                    [quads + offset*np.eye(ndim)[i] for offset in offsets[i]] )
+                quadWeights = np.concatenate(
+                    [quadWeights * weight for weight in weights[i]] )
+
+            quads += [self.nodeX[iPlane], 0]
+
+            for iQ, quad in enumerate(quads):
+                inds, phis, gradphis = self.dphi(quad)
+
+                nInds = inds.size
+                nEntries = 2*nInds
+                gd[index:index+nEntries] = gradphis.T.ravel()
+                ci[index:index+nEntries] = iQ + iPlane*nQuadsPerPlane
+                ri[index:index+nInds] = inds
+                ri[index+nInds:index+nEntries] = inds + nNodes
+                index += nEntries
+
+                quadWeight = quadWeights[iQ]
+                self.gradphiSumsOld[inds] -= gradphis * quadWeight
+                if vci == 1:
+                    storage.append((quad, inds, phis, gradphis))
+                elif vci == 2:
+                    disps = self.boundary.computeDisplacements(quad, inds)
+                    rDisps = np.empty((nInds, 3))
+                    rDisps[:,:2] = gradphis*disps + phis.reshape(-1,1)
+                    rDisps[:,2] = (gradphis*disps[:,-1::-1]).sum(axis=1)
+                    self.rOld[inds,2:] -= rDisps * quadWeight
+                    storage.append((quad, inds, phis, gradphis, rDisps))
+                    nEntries = 3*nInds
+                    gd[index:index+nEntries] = rDisps.T.ravel()
+                    ci[index:index+nEntries] = iQ + iPlane*nQuadsPerPlane
+                    ri[index:index+nInds] = inds + 2*nNodes
+                    ri[index+nInds:index+2*nInds] = inds + 3*nNodes
+                    ri[index+2*nInds:index+nEntries] = inds + 4*nNodes
+                    index += nEntries
+                
+            quadWeightsList.append(quadWeights)
+
+        # Add final constraint that sum of weights doesn't change
+        nConstraints += 1
+        self.nConstraints = nConstraints
+        gd[index:index + nQuads] = 1.0
+        ri[index:index + nQuads] = nConstraintsPerNode*nNodes
+        ci[index:index + nQuads] = np.arange(nQuads)
+        index += nQuads
+
+        ##### Using SuiteSparse min2norm (QR based solver) #####
+        self.vci_solver = 'ssqr.min2norm'
+        G = sp.csc_matrix((gd[:index], (ri[:index], ci[:index])),
+                          shape=(np.iinfo('int32').max + 1, nQuads))
+        G._shape = (nConstraints, nQuads)
+        del gd, ci, ri, offsets, weights, quads
+        start_time = default_timer()
+        # ### solve for quadWeights directly (doesn't work as well!)
+        # rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
+        # quadWeights = ssqr.min2norm(G, rhs).ravel()
+        ### solve for corrections to quadWeights
+        quadWeights = np.concatenate(quadWeightsList)
+        if vci == 1:
+            rhs = np.append(self.gradphiSumsOld.T.ravel(), 0)
+        elif vci == 2:
+            rhs = np.append(self.rOld.T.ravel(), 0)
+        quadWeightCorrections = ssqr.min2norm(G, rhs).ravel()
+        quadWeights += quadWeightCorrections
+        print(f'xi solve time = {default_timer()-start_time} s')
+        
+        # ##### Using sparse_dot_mkl (QR based solver) (not-working) #####
+        # self.vci_solver = 'sparse_dot_mkl.sparse_qr_solve_mkl'
+        # import sparse_dot_mkl
+        # # G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),
+        # #                   shape=(nConstraints, np.iinfo('int32').max + 1))
+        # # G._shape = (nConstraints, nQuads)
+        # G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),
+        #                   shape=(nConstraints, nQuads))
+        # del gd, ci, ri, offsets, weights, quads, quadWeights
+        # start_time = default_timer()
+        # rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
+        # quadWeights = sparse_dot_mkl.sparse_qr_solve_mkl(G, rhs).ravel()
+        # print(f'xi solve time = {default_timer()-start_time} s')
+
+        # ##### Using scipy.sparse.linalg, much slower, but uses less memory #####
+        # G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),
+        #                         shape=(nConstraints, nQuads))
+        # maxit = 100*nQuads
+        # tol = 1e-10
+        # start_time = default_timer()
+        # # ### solve for quadWeights directly (does not work nearly as well!)
+        # # rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
+        # # # quadWeights = sp_la.lsmr(self.G, rhs, atol=tol, btol=tol, maxiter=maxit)[0]
+        # # # self.vci_solver = 'scipy.sparse.linalg.lsmr'
+        # # quadWeights = sp_la.lsqr(self.G, rhs, atol=tol, btol=tol, iter_lim=maxit)[0]
+        # # self.vci_solver = 'scipy.sparse.linalg.lsqr'
+        # ### solve for corrections to quadWeights
+        # quadWeights = np.concatenate(quadWeightsList)
+        # if vci == 1:
+        #     rhs = np.append(self.gradphiSumsOld.T.ravel(), 0)
+        # elif vci == 2:
+        #     rhs = np.append(self.rOld.T.ravel(), 0)
+        # # scale rows of G
+        # for i in range(G.shape[0]):
+        #     norm = np.sqrt((G.data[G.indptr[i]:G.indptr[i+1]]**2).sum())
+        #     G.data[G.indptr[i]:G.indptr[i+1]] /= norm
+        #     rhs[i] /= norm
+        # # self.vci_solver = 'scipy.sparse.linalg.lsmr'
+        # # quadWeightCorrections = sp_la.lsmr(G, rhs, atol=tol, btol=tol, maxiter=maxit)
+        # self.vci_solver = 'scipy.sparse.linalg.lsqr'
+        # quadWeightCorrections = sp_la.lsqr(G, rhs, atol=tol, btol=tol, iter_lim=maxit)
+        # if quadWeightCorrections[1] == 7:
+        #     print('Max iterations reached in xi solve')
+        # quadWeights += quadWeightCorrections[0]
+        # print(f'xi solve time = {default_timer()-start_time} s')
+        
+        self.G = G
+        # del G, rhs, quadWeightsList
+        try:
+            del quadWeightCorrections
+        except:
+            pass
+
+        index = 0
+        for iQ, items in enumerate(storage):
+            quadWeight = quadWeights[iQ]
+            if vci == 1:
+                quad, inds, phis, gradphis = items
+            if vci == 2:
+                quad, inds, phis, gradphis, rDisps = items
+                self.rNew[inds,2:] -= rDisps * quadWeight
+            self.gradphiSumsNew[inds] -= gradphis * quadWeight
+            self.u_weights[inds] += quadWeight * phis
+            if f is not None:
+                self.b[inds] += f(quad) * phis * quadWeight
+            nEntries = inds.size**2
+            Kdata[index:index+nEntries] = quadWeight * \
+                np.ravel( gradphis @ (self.diffusivity @ gradphis.T) )
+            Adata[index:index+nEntries] = quadWeight * \
+                np.ravel( np.outer(np.dot(gradphis, self.velocity), phis) )
+            if not massLumping:
+                Mdata[index:index+nEntries] = quadWeight * \
+                    np.ravel( np.outer(phis, phis) )
+            row_ind[index:index+nEntries] = np.repeat(inds, inds.size)
+            col_ind[index:index+nEntries] = np.tile(inds, inds.size)
+            index += nEntries
+        
+        del storage
+
+        Kdata = np.concatenate((Kdata[:index], opMatBints[0]))
+        Adata = np.concatenate((Adata[:index], opMatBints[1]))
+        row_ind = np.concatenate((row_ind[:index], opMatBints[2]))
+        col_ind = np.concatenate((col_ind[:index], opMatBints[3]))
+        self.K = sp.csr_matrix( (Kdata, (row_ind, col_ind)),
+                                shape=(nNodes, nNodes) )
+        self.A = sp.csr_matrix( (Adata, (row_ind, col_ind)),
+                                shape=(nNodes, nNodes) )
+        if massLumping:
+            self.M = sp.diags(self.u_weights, format='csr')
+        else:
+            self.M = sp.csr_matrix( (Mdata[:index], (row_ind[:index], col_ind[:index])),
+                                shape=(nNodes, nNodes) )
+
+    def computeSpatialDiscretizationConservativeVCI6(self, f=None, NQX=1,
+            NQY=None, Qord=2, quadType='gauss', massLumping=False,
+            vci='linear', **kwargs):
+        """Assemble the system discretization matrices K, A, M in CSR format.
+        Implements linear variationally consistent integration by re-weighting
+        the quadrature points.
+
+        K is the stiffness matrix from the diffusion term
+        A is the advection matrix
+        M is the mass matrix from the time derivative
+
+        Parameters
+        ----------
+        f : {callable, None}, optional
+            Forcing function. Must take 2D array of points and return 1D array.
+            The default is None.
+        NQX : int, optional
+            Number of quadrature cell divisions between FCI planes.
+            The default is 1.
+        NQY : {int, None}, optional
+            Number of quadrature cell divisions in y-direction.
+            The default is None, which sets NQY = NY.
+        Qord : int, optional
+            Number of quadrature points in each grid cell along one dimension.
+            The default is 2.
+        quadType : string, optional
+            Type of quadrature to be used. Must be either 'gauss' or 'uniform'.
+            Produces either Gauss-Legendre or Newton-Cotes type points/weights.
+            The default is 'gauss'.
+        massLumping : bool, optional
+            Determines whether mass-lumping is used to calculate M matrix.
+            The default is False.
+        vci : {int, string}, optional
+            Order of VCI correction to apply. If int must be 1 or 2, if string
+            must be in ['linear', 'quadratic']. The Default is 'linear'.
+
+        Returns
+        -------
+        None.
+
+        """
+        if vci in [1, 'linear', 'Linear', 'l', 'L']:
+            self.vci = 'VC1-C (whole domain)'
+            vci = 1
+        elif vci in [2, 'quadratic', 'Quadratic', 'q', 'Q']:
+            self.vci = 'VC2-C (whole domain)'
+            vci = 2
+        else:
+              raise ValueError('Unknown VCI order vci={vci}')
+        ndim = self.ndim
+        nNodes = self.nNodes
+        nNodes = self.nNodes
+        NX = self.NX
+        NY = self.NY
+        if NQY is None:
+            NQY = NY
+        self.f = f
+        self.NQX = NQX
+        self.NQY = NQY
+        self.Qord = Qord
+        self.massLumping = massLumping
+        if quadType.lower()[0] == 'g':
+            self.quadType = quadType = 'Gauss-Legendre'
+        elif quadType.lower()[0] == 'u':
+            self.quadType = quadType = 'uniform'
+        # pre-allocate arrays for operator matrix triplets
+        nQuadsPerPlane = NQX * NQY * Qord**2
+        nQuads = nQuadsPerPlane * NX
+        self.nQuads = nQuads
+        nMaxEntries = int((nNodes * self.boundary.volume)**2 * nQuads)
+        Kdata = np.empty(nMaxEntries)
+        Adata = np.empty(nMaxEntries)
+        if not massLumping:
+            Mdata = np.empty(nMaxEntries)
+        row_ind = np.empty(nMaxEntries, dtype='int')
+        col_ind = np.empty(nMaxEntries, dtype='int')
+        self.b = np.zeros(nNodes)
+        self.u_weights = np.zeros(nNodes)
+
+        storage = []
+        quadWeightsList = []
+
+        if vci == 1:
+            nConstraintsPerNode = 2
+        elif vci == 2:
             nConstraintsPerNode = 6
         nConstraints = nConstraintsPerNode * nNodes
         if nQuads < nConstraints:
