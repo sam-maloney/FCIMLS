@@ -59,25 +59,25 @@ class quadraticPatch:
         return 0.5 + 0.1*x + 0.8*y + 1.2*x*y + 0.8*x*x + 0.6*y*y
 
 # f = sinXsinY()
-# f = QuadraticTestProblem()
-f = linearPatch()
+f = QuadraticTestProblem()
+# f = linearPatch()
 # f = quadraticPatch()
 
-mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
-# mapping = fcimls.mappings.QuadraticMapping(f.a, f.b)
+# mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
+mapping = fcimls.mappings.QuadraticMapping(f.a, f.b)
 # mapping = fcimls.mappings.LinearMapping(1/f.xmax)
 # mapping = fcimls.mappings.StraightMapping()
 
 Nratio = 1
-perturbation = 0.1
+perturbation = 0.
 kwargs={
     'mapping' : mapping,
-    'boundary' : ('Dirichlet', (1.5, f, None)),
-    # 'boundary' : ('periodic', 1.5),
-    'basis' : 'linear',
-    # # 'boundary' : ('Dirichlet', (3., f, Nratio*3)),
+    # 'boundary' : ('Dirichlet', (1.5, f, None)),
+    # # 'boundary' : ('periodic', 1.5),
+    # 'basis' : 'linear',
+    'boundary' : ('Dirichlet', (3.5, f, Nratio*2)),
     # 'boundary' : ('periodic', 2.5),
-    # 'basis' : 'quadratic',
+    'basis' : 'quadratic',
     'kernel' : 'cubic',
     'velocity' : np.array([0., 0.]),
     'diffusivity' : 1., # Makes diffusivity matrix K into Poisson operator
@@ -88,8 +88,8 @@ kwargs={
     'ymax' : f.ymax }
 
 # allocate arrays for convergence testing
-start = 4
-stop = 4
+start = 5
+stop = 5
 nSamples = stop - start + 1
 NX_array = np.logspace(start, stop, num=nSamples, base=2, dtype='int32')
 E_inf = np.empty(nSamples, dtype='float64')
@@ -106,7 +106,7 @@ for iN, NX in enumerate(NX_array):
     # NQX = Nratio*3
     NQX = 1
     NQY = NY
-    Qord = 2
+    Qord = 3
 
     # allocate arrays and compute grid
     sim = fcimls.FciMlsSim(NX, NY, **kwargs)
@@ -147,12 +147,15 @@ for iN, NX in enumerate(NX_array):
 
     # compute the analytic solution and error norms
     u_exact = f(sim.nodes)
-    u_diff = sim.u - u_exact
+    u_diff = u_exact - sim.u
     E_inf[iN] = np.linalg.norm(u_diff, np.inf)
     E_2[iN] = np.linalg.norm(u_diff)/np.sqrt(sim.nNodes)
 
-    print(f'max error = {E_inf[iN]}')
-    print(f'L2 error  = {E_2[iN]}\n')
+    # print(f'max error = {E_inf[iN]}')
+    # print(f'L2 error  = {E_2[iN]}\n')
+    with np.printoptions(formatter={'float': lambda x: format(x, '.8e')}):
+        print('E_2   =', repr(E_2))
+        print('E_inf =', repr(E_inf), '\n', flush=True)
     
 # print summary
 print(f'xmax = {f.xmax}, {mapping}')
@@ -167,7 +170,7 @@ with np.printoptions(formatter={'float': lambda x: format(x, '.8e')}):
     print('E_inf   =', repr(E_inf))
 
 
-#%% Plotting
+# %% Plotting
 
 # clear the current figure, if opened, and set parameters
 fig = plt.figure(figsize=(7.75, 3))
@@ -184,19 +187,19 @@ fig.subplots_adjust(hspace=0.3, wspace=0.3)
 # plt.rc('legend', fontsize=SMALL_SIZE)    # legend fontsize
 # plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
-sim.generatePlottingPoints(nx=1, ny=1)
+sim.generatePlottingPoints(nx=4, ny=4)
 sim.computePlottingSolution()
 
 exact_sol = f(np.vstack((sim.X,sim.Y)).T)
-error = sim.U - exact_sol
+error = exact_sol - sim.U
 maxAbsErr = np.max(np.abs(error))
 vmin = -maxAbsErr
 vmax = maxAbsErr
 
 ax1 = plt.subplot(121)
 field = ax1.tripcolor(sim.X, sim.Y, error, shading='gouraud'
-                     ,cmap='seismic', vmin=vmin, vmax=vmax
-                     )
+                      ,cmap='RdBu', vmin=vmin, vmax=vmax
+                      )
 x = np.linspace(0, sim.nodeX[-1], 100)
 if mapping.name == 'quadratic':
     startingPoints = [0.]

@@ -156,16 +156,16 @@ class quadraticPatch:
         return 0.5 + 0.1*x + 0.8*y + 1.2*x*y + self.xx*x*x + self.yy*y*y
 
 # f = QuadraticTestProblem()
-# f = slantedTestProblem()
+f = slantedTestProblem()
 # f = simplifiedSlantProblem()
 # f = sinXsinY()
 # f = linearPatch()
-f = quadraticPatch()
+# f = quadraticPatch()
 
 # mapping = fcimls.mappings.SinusoidalMapping(0.2, -0.25*f.xmax, f.xmax)
 # mapping = fcimls.mappings.QuadraticMapping(f.a, f.b)
-# mapping = fcimls.mappings.LinearMapping(1/f.xmax)
-mapping = fcimls.mappings.StraightMapping()
+mapping = fcimls.mappings.LinearMapping(1/f.xmax)
+# mapping = fcimls.mappings.StraightMapping()
 
 perturbation = 0.1
 kwargs={
@@ -173,8 +173,8 @@ kwargs={
     # 'boundary' : ('Dirichlet', (1.5, f.solution, None)),
     # # 'boundary' : ('periodic', 1.5),
     # 'basis' : 'linear',
-    'boundary' : ('Dirichlet', (2.5, f.solution, 1)),
-    # 'boundary' : ('periodic', 2.5),
+    # 'boundary' : ('Dirichlet', (2.5, f.solution, 1)),
+    'boundary' : ('periodic', 2.5),
     'basis' : 'quadratic',
     'kernel' : 'cubic',
     # 'kernel' : 'quartic',
@@ -189,8 +189,8 @@ kwargs={
     'ymax' : f.ymax }
 
 # allocate arrays for convergence testing
-start = 3
-stop = 3
+start = 6
+stop = 6
 nSamples = np.rint(stop - start + 1).astype('int')
 NX_array = np.logspace(start, stop, num=nSamples, base=2, dtype='int')
 E_inf = np.empty(nSamples)
@@ -208,13 +208,13 @@ for iN, NX in enumerate(NX_array):
 
     start_time = default_timer()
 
-    Nratio = 1
+    Nratio = 16
 
     NY = NX*Nratio
     # NX = 16
 
     # NQX = Nratio // 2
-    NQX = 1
+    NQX = 2
     NQY = NY
     Qord = 3
 
@@ -306,8 +306,11 @@ for iN, NX in enumerate(NX_array):
     E_inf[iN] = np.linalg.norm(sim.u - uExact, np.inf) / f.umax
     E_2[iN] = np.linalg.norm(sim.u - uExact)/np.sqrt(sim.nNodes) / f.umax
 
-    print(f'max error  = {E_inf[iN]:.8e}')
-    print(f'L2 error   = {E_2[iN]:.8e}\n', flush=True)
+    # print(f'max error  = {E_inf[iN]:.8e}')
+    # print(f'L2 error   = {E_2[iN]:.8e}\n', flush=True)
+    with np.printoptions(formatter={'float': lambda x: format(x, '.8e')}):
+        print('E_2   =', repr(E_2))
+        print('E_inf =', repr(E_inf), '\n', flush=True)
 
 # print summary
 print(f'xmax = {f.xmax}, {mapping}')
@@ -326,7 +329,7 @@ with np.printoptions(formatter={'float': lambda x: format(x, '.8e')}):
     # print(E_inf[0])
 
 
-# #%% Plotting
+# # %% Plotting
 
 # plt.rc('pdf', fonttype=42)
 # plt.rc('text', usetex=True)

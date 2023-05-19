@@ -8,6 +8,43 @@ Created on Mon May 17 17:46:29 2021
 import numpy as np
 import matplotlib.pyplot as plt
 
+class slantedTestProblem:
+    xmax = 1.
+    ymax = 1.
+    n = 8
+
+    xfac = 2*np.pi/xmax
+    yfac = 2*np.pi/ymax
+    n2 = n*n
+    yf2 = yfac*yfac
+    _2nyf2 = 2*n*yf2
+    n2xf2pyf2 = n2*(xfac*xfac + yf2)
+    n2xf2pyf2pyf2 = n2xf2pyf2 + yf2
+
+    A = 0.5 / n2xf2pyf2
+    B = 0.5 / (n2xf2pyf2pyf2 - _2nyf2*_2nyf2/n2xf2pyf2pyf2)
+    C = B*_2nyf2 / n2xf2pyf2pyf2
+
+    aA = abs(A)
+    aB = abs(B)
+    aC = abs(C)
+    umax = aA + aB + aC
+
+    def __call__(self, p):
+        x = p.reshape(-1,2)[:,0]
+        y = p.reshape(-1,2)[:,1]
+        yarg = self.yfac*y
+        return 0.5*np.sin(self.n*(yarg - self.xfac*x))*(1 + np.sin(yarg))
+
+    def solution(self, p):
+        x = p.reshape(-1,2)[:,0]
+        y = p.reshape(-1,2)[:,1]
+        yarg = self.yfac*y
+        xyarg = self.n*(yarg - self.xfac*x)
+        return self.A*np.sin(xyarg) + self.B*np.sin(yarg)*np.sin(xyarg) \
+                                    + self.C*np.cos(yarg)*np.cos(xyarg)
+
+
 E_2 = []
 E_inf = []
 t_setup = []
@@ -16,7 +53,6 @@ labels = []
 NX = []
 NY = []
 
-##### VCI-C (whole domain) #####
 
 # For all of the below, unless otherwise noted
 # points on axes constrained via Lagrange multipliers
@@ -31,170 +67,67 @@ NY = []
 # massLumping = False
 
 
-##### NQX = 1, Qord = 3, quadType = Gauss-Legendre
 
-# # StraightMapping()
-# # VCI: None using None
-# E_2.append(np.array([8.82567144e+00, 2.77912929e-01, 1.55893826e-01, 1.02159737e-02,
-#        3.11636630e-03, 9.88205497e-04, 4.08445565e-04]))
-# E_inf.append(np.array([1.84377958e+01, 7.22907319e-01, 4.52238763e-01, 4.74116020e-02,
-#        1.58404367e-02, 5.40643611e-03, 2.89174725e-03]))
-# labels.append('unaligned 1:1, no VCI')
-# NX.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
-# NY.append(1)
+##### VCI: VC2-C (whole domain) using ssqr.min2norm #####
 
-# # StraightMapping()
-# # VCI: VC2-C (whole domain) using ssqr.min2norm
-# E_2.append(np.array([2.17477562e+01, 6.20306535e+00, 4.95240407e-01, 3.18621101e-02,
-#        3.02674879e-03, 4.07198399e-04]))
-# E_inf.append(np.array([5.45452786e+01, 1.95737399e+01, 1.73450007e+00, 1.71463078e-01,
-#        1.68801072e-02, 2.85822630e-03]))
-# labels.append('unaligned 1:1, VC2-C')
-# NX.append(np.array([  4,   8,  16,  32,  64, 128]))
-# NY.append(1)
+# StraightMapping(), NQX = 2, Qord = 3, quadType = Gauss-Legendre
+E_2.append(np.array([2.34448055e+00, 6.57188630e-01, 2.70008304e-01, 1.82040318e-02,
+       2.56882481e-03, 3.76863982e-04, 6.23491998e-05]))
+E_inf.append(np.array([7.00554879e+00, 1.94212399e+00, 8.76743557e-01, 1.19757763e-01,
+       1.47687995e-02, 2.35242704e-03, 4.63392782e-04]))
+labels.append(r'unaligned \ratio{1}{1}, NQX=2,3g')
+NX.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
+NY.append(1)
 
-
-##### VCI: VC2-C (whole domain) using ssqr.min2norm
-
-# # StraightMapping(), NQX = 2, Qord = 2, quadType = Gauss-Legendre
-# E_2.append(np.array([4.55303179e+01, 4.87389007e+01, 1.97373530e+00, 5.99196411e-01,
-#        3.09522991e-01, 3.68915079e-02, 2.35175102e-03]))
-# E_inf.append(np.array([1.19104535e+02, 1.13987341e+02, 7.06690978e+00, 4.61815112e+00,
-#        7.91826940e+00, 9.85003330e-01, 1.39306965e-01]))
-# labels.append('unaligned 1:1, NQX=2,2g')
-# NX.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
-# NY.append(1)
-
-# # LinearMapping(1.0), NQX = 2, Qord = 2, quadType = Gauss-Legendre
-# E_2.append(np.array([5.06105761e+01, 1.57136186e+01, 2.45170387e-01, 6.91172954e-03,
-#        1.60971161e-03, 2.88747184e-04, 5.52500522e-05]))
-# E_inf.append(np.array([1.14438650e+02, 4.49788670e+01, 8.94738349e-01, 4.03158752e-02,
-#        9.09576612e-03, 1.26080516e-03, 2.05104334e-04]))
-# labels.append('aligned 1:1, NQX=2,2g')
+# # LinearMapping(1.0), NQX = 2, Qord = 3, quadType = Gauss-Legendre
+# E_2.append(np.)
+# E_inf.append(np.)
+# labels.append(r'aligned \ratio{1}{1}, NQX=2,3g')
 # NX.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
 # NY.append(1)
 
 # StraightMapping(), NQX = 2, Qord = 3, quadType = uniform
-E_2.append(np.array([3.66500704e+00, 1.79102106e+00, 2.44918893e-01, 1.60849314e-02,
-       2.47328472e-03, 4.55351099e-04, 8.58986774e-05]))
-E_inf.append(np.array([1.15697486e+01, 6.40099115e+00, 8.48972481e-01, 7.51296999e-02,
-       1.13340149e-02, 2.39105291e-03, 3.65807720e-04]))
-labels.append('unaligned 1:1, NQX=2,3u')
+E_2.append(np.array([1.49748386e+00, 4.13366596e-01, 2.43554769e-01, 1.22880284e-02,
+       2.34931415e-03, 3.73777518e-04, 5.68981496e-05]))
+E_inf.append(np.array([3.66002239e+00, 1.45171538e+00, 8.41521212e-01, 6.46384067e-02,
+       1.23272660e-02, 2.46645256e-03, 4.04293772e-04]))
+labels.append(r'unaligned \ratio{1}{1}, NQX=2,3u')
 NX.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
 NY.append(1)
 
 # LinearMapping(1.0), NQX = 2, Qord = 3, quadType = uniform
-E_2.append(np.array([4.50816969e+00, 4.35767178e+00, 2.27755332e-01, 5.66164282e-03,
-       1.30324143e-03, 1.92936997e-04, 2.43886935e-05]))
-E_inf.append(np.array([1.12285705e+01, 1.16367501e+01, 8.02927946e-01, 2.25277766e-02,
-       8.54735061e-03, 1.13792309e-03, 1.56774456e-04]))
-labels.append('aligned 1:1, NQX=2,3u')
+E_2.append(np.array([5.58812015e-01, 4.40555489e-01, 2.27694333e-01, 5.63276224e-03,
+       1.30464751e-03, 1.93062275e-04, 2.43904087e-05]))
+E_inf.append(np.array([1.29977295e+00, 1.61485914e+00, 8.02708986e-01, 2.33030391e-02,
+       8.53413834e-03, 1.14301712e-03, 1.56013312e-04]))
+labels.append(r'aligned \ratio{1}{1}, NQX=2,3u')
 NX.append(np.array([  4,   8,  16,  32,  64, 128, 256]))
 NY.append(1)
 
-# # LinearMapping(1.0), NQX = 8, Qord = 2, quadType = Gauss-Legendre
-# E_2.append(np.array([3.44959790e-01, 6.12602939e-03, 1.49298664e-03, 2.60175830e-04,
-#        4.45884164e-05]))
-# E_inf.append(np.array([1.14265230e+00, 1.90433565e-02, 6.52609015e-03, 1.44858252e-03,
-#        2.58464568e-04]))
-# labels.append('aligned 1:4, NQX=8,2g')
-# NX.append(np.array([  4,   8,  16,  32,  64]))
-# NY.append(4)
-
-# # LinearMapping(1.0), NQX = 2, Qord = 2, quadType = Gauss-Legendre
-# E_2.append(np.array([1.66169594e+00, 1.69620186e-02, 2.41096928e-03, 4.97752447e-04,
-#        1.01626603e-04]))
-# E_inf.append(np.array([5.82085945e+00, 7.65940483e-02, 1.02204636e-02, 2.52891644e-03,
-#        6.49573968e-04]))
-# labels.append('aligned 1:4, NQX=2,2g')
-# NX.append(np.array([  4,   8,  16,  32,  64]))
-# NY.append(4)
-
-# # LinearMapping(1.0), NQX = 2, Qord = 3, quadType = Gauss-Legendre
-# E_2.append(np.array([4.41959593e+00, 1.68091535e-02, 1.73554458e-03, 4.21024560e-04,
-#        8.01677881e-05]))
-# E_inf.append(np.array([1.75904131e+01, 6.45119958e-02, 8.35585185e-03, 2.11284403e-03,
-#        4.27901017e-04]))
-# labels.append('aligned 1:4, NQX=2,3g')
-# NX.append(np.array([  4,   8,  16,  32,  64]))
-# NY.append(4)
-
-# # LinearMapping(1.0), NQX = 3, Qord = 3, quadType = Gauss-Legendre
-# E_2.append(np.array([3.51824312e-01, 5.54896748e-03, 1.33837855e-03, 2.30668059e-04,
-#        3.79359402e-05]))
-# E_inf.append(np.array([1.69869701e+00, 1.92814415e-02, 5.50023563e-03, 1.47238252e-03,
-#        2.29241331e-04]))
-# labels.append('aligned 1:4, NQX=3,3g')
-# NX.append(np.array([  4,   8,  16,  32,  64]))
-# NY.append(4)
-
-# # LinearMapping(1.0), NQX = 1, Qord = 4, quadType = Gauss-Legendre
-# E_2.append(np.array([1.09973557e+00, 6.02082923e-03, 1.28066069e-03, 1.99170827e-04,
-#        3.19313391e-05]))
-# E_inf.append(np.array([3.20258949e+00, 1.87350009e-02, 5.53445403e-03, 1.09845947e-03,
-#        1.71007950e-04]))
-# labels.append('aligned 1:4, NQX=1,4g')
-# NX.append(np.array([  4,   8,  16,  32,  64]))
-# NY.append(4)
-
-# LinearMapping(1.0), NQX = 1, Qord = 4, quadType = uniform
-E_2.append(np.array([9.79455032e-01, 5.40716549e-03, 1.27020551e-03, 1.80888643e-04,
-        2.57871979e-05, 3.30007431e-06]))
-E_inf.append(np.array([2.81602177e+00, 1.75729625e-02, 5.68631075e-03, 1.13147280e-03,
-        1.65057532e-04, 2.42178172e-05]))
-labels.append('aligned 1:4, NQX=1,4u')
+# LinearMapping(1.0), NQX = 2, Qord = 3, quadType = uniform
+E_2.append(np.array([8.32725482e-01, 6.83975487e-03, 1.41657777e-03, 2.29692308e-04,
+       4.15332850e-05, 7.80225451e-06]))
+E_inf.append(np.array([1.97781921e+00, 2.26051146e-02, 7.19082036e-03, 1.42557487e-03,
+       2.51456921e-04, 5.19011570e-05]))
+labels.append(r'aligned \ratio{1}{4}, NQX=2,3u')
 NX.append(np.array([  4,   8,  16,  32,  64, 128]))
 NY.append(4)
 
-# LinearMapping(1.0), NQX = 1, Qord = 4, quadType = uniform
-E_2.append(np.array([4.82169629e-02, 1.71950170e-03, 2.92268704e-04, 4.33212514e-05,
-       6.52183947e-06]))
-E_inf.append(np.array([1.84738650e-01, 6.73128239e-03, 1.46019883e-03, 1.98598135e-04,
-       3.82148971e-05]))
-labels.append('aligned 1:8, NQX=1,4u')
+# LinearMapping(1.0), NQX = 2, Qord = 3, quadType = uniform
+E_2.append(np.array([1.41905661e-01, 1.76590574e-03, 3.64978620e-04, 6.03782613e-05,
+       1.36267383e-05]))
+E_inf.append(np.array([3.22980550e-01, 8.36416520e-03, 1.53023784e-03, 3.08456060e-04,
+       7.68059481e-05]))
+labels.append(r'aligned \ratio{1}{8}, NQX=2,3u')
 NX.append(np.array([ 4,  8, 16, 32, 64]))
 NY.append(8)
 
-# LinearMapping(1.0), NQX = 1, Qord = 4, quadType = uniform
-E_2.append(np.array([3.13801661e-02, 1.48245200e-03, 2.70289858e-04, 3.14147767e-05]))
-E_inf.append(np.array([8.62556909e-02, 6.19591903e-03, 1.46127737e-03, 1.77080847e-04]))
-labels.append('aligned 1:16, NQX=1,4u')
+# LinearMapping(1.0), NQX = 2, Qord = 3, quadType = uniform
+E_2.append(np.array([6.13374407e-02, 1.51427170e-03, 2.79576324e-04, 3.60091818e-05]))
+E_inf.append(np.array([1.93650006e-01, 6.10881333e-03, 1.38417292e-03, 1.54424495e-04]))
+labels.append(r'aligned \ratio{1}{16}, NQX=2,3u')
 NX.append(np.array([ 4,  8, 16, 32]))
 NY.append(16)
-
-# # LinearMapping(1.0), NQX = 1, Qord = 5, quadType = Gauss-Legendre
-# E_2.append(np.array([7.17676847e-01, 6.14319887e-03, 1.25078620e-03, 1.78853126e-04,
-#        2.49834358e-05]))
-# E_inf.append(np.array([1.93777258e+00, 2.30865131e-02, 5.82127075e-03, 1.09375224e-03,
-#        1.49534970e-04]))
-# labels.append('aligned 1:4, NQX=1,5g')
-# NX.append(np.array([  4,   8,  16,  32,  64]))
-# NY.append(4)
-
-# # LinearMapping(1.0), NQX = 1, Qord = 5, quadType = uniform
-# E_2.append(np.array([4.86802211e-01, 5.18244268e-03, 1.21784540e-03, 1.70744332e-04,
-#        2.30191779e-05]))
-# E_inf.append(np.array([2.07768700e+00, 1.99852840e-02, 5.45610152e-03, 1.06844313e-03,
-#        1.29661185e-04]))
-# labels.append('aligned 1:4, NQX=1,5u')
-# NX.append(np.array([  4,   8,  16,  32,  64]))
-# NY.append(4)
-
-# # LinearMapping(1.0), NQX = 1, Qord = 5, quadType = uniform
-# E_2.append(np.array([3.88550175e-02, 1.68499191e-03, 2.88484017e-04, 4.03326149e-05,
-#         5.61124195e-06]))
-# E_inf.append(np.array([1.21179301e-01, 7.00808864e-03, 1.29588412e-03, 2.09248923e-04,
-#         3.70929167e-05]))
-# labels.append('aligned 1:8, NQX=1,5u')
-# NX.append(np.array([ 4,  8, 16, 32, 64]))
-# NY.append(8)
-
-# # LinearMapping(1.0), NQX = 1, Qord = 5, quadType = uniform
-# E_2.append(np.array([2.77648961e-02, 1.42369230e-03, 2.67420295e-04, 2.99999984e-05]))
-# E_inf.append(np.array([7.53332438e-02, 5.77539634e-03, 1.37215238e-03, 1.69496502e-04]))
-# labels.append('aligned 1:16, NQX=1,5u')
-# NX.append(np.array([ 4,  8, 16, 32]))
-# NY.append(16)
 
 
 
@@ -207,7 +140,18 @@ plt.rc('markers', fillstyle='full')
 plt.rc('lines', markersize=5.0)
 plt.rc('pdf', fonttype=42)
 plt.rc('text', usetex=True)
-plt.rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
+plt.rc('text.latex', preamble=r'\usepackage[T1]{fontenc}'
+                                r'\usepackage[osf,largesc]{newpxtext}'
+                                # r'\usepackage[osf,nohelv,largesc]{newpxtext}'
+                                r'\usepackage[euler-digits]{eulervm}'
+                                # r'\usepackage{eulerpx}'
+                                # r'\usepackage[sans]{libertinus}'
+                                r'\usepackage{classico}'
+                                r'\usepackage{mathtools}'
+                                r'\newcommand*{\ratio}[2]{\ensuremath{#1\mathop{:}#2}}'
+                                )
+plt.rc('font', family='sans-serif')
+# plt.rc('font', **{'family': 'serif', 'serif': ['Computer Modern']})
 # fontsize : int or {'xx-small', 'x-small', 'small', 'medium', 'large', 'x-large', 'xx-large'}
 # plt.rc('font', size='small')
 plt.rc('legend', fontsize='small')
@@ -287,8 +231,8 @@ xlim = axL1.get_xlim()
 axR1.set_prop_cycle(cycler)
 axR1.axhline(3, linestyle=':', color=black, label='3rd order', zorder=0,
              linewidth=dashed_linewidth)
-axR1.axhline(4, linestyle=':', color=black, label='4th order', zorder=0,
-             linewidth=dashed_linewidth)
+# axR1.axhline(4, linestyle=':', color=black, label='4th order', zorder=0,
+#              linewidth=dashed_linewidth)
 for i, error in enumerate(E_2):
     logE = np.log(error[inds[i]])
     logN = np.log(NX[i][inds[i]])
@@ -301,7 +245,7 @@ axR1.set_xlim(xlim)
 axR1.set_xlabel(r'$\log_2(N_xN_y)$')
 axR1.set_ylabel(r'Intra-step Order of Convergence')
 ordb = 1
-ordt = 5
+ordt = 4
 ordstep = 1
 axR1.set_ylim(ordb, ordt)
 axR1.set_yticks(np.linspace(ordb, ordt, int((ordt - ordb)/ordstep) + 1))

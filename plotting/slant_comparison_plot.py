@@ -44,6 +44,7 @@ class slantedTestProblem:
         return self.A*np.sin(xyarg) + self.B*np.sin(yarg)*np.sin(xyarg) \
                                     + self.C*np.cos(yarg)*np.cos(xyarg)
 
+
 E_2 = []
 E_inf = []
 t_setup = []
