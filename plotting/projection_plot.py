@@ -280,7 +280,7 @@ field = axes[1,0].tripcolor(X.ravel(), Y.ravel(), U, shading='gouraud',
                             cmap=solutioncmap, vmin=-1, vmax=1)
 cbar = fig.colorbar(field, ax=axes[1,0])
 cbar.set_ticks(np.linspace(-1,1,5))
-cbar.set_label(r'$f(x,y)$', **right_title_kwargs)
+cbar.set_label(r'$u(x,y)$', **right_title_kwargs)
 # x = np.linspace(0, sim.nodeX[-1], 100)
 # axes[1,0].plot(x, [sim.mapping(np.array([[0, float(yi)]]), i) for i in x], 'k')
 
@@ -290,7 +290,7 @@ field = axes[1,1].tripcolor(X.ravel(), Y.ravel(), U, shading='gouraud',
                             cmap=solutioncmap, vmin=-1, vmax=1)
 cbar = fig.colorbar(field, ax=axes[1,1])
 cbar.set_ticks(np.linspace(-1,1,5))
-cbar.set_label(r'$f(x,y)$', **right_title_kwargs)
+cbar.set_label(r'$u(x,y)$', **right_title_kwargs)
 
 errorcmap = 'RdBu'
 # errorcmap = 'seismic'
@@ -306,7 +306,7 @@ maxAbsE = np.max(np.abs(E))
 field = axes[2,1].tripcolor(X.ravel(), Y.ravel(), E/maxAbsE, shading='gouraud',
                             cmap=errorcmap, vmin=-1, vmax=1)
 cbar = fig.colorbar(field, ax=axes[2,1])
-cbar.set_label(r'\[\normalise{f-u}\]', **right_title_kwargs)
+cbar.set_label(r'\[\normalise{u-u^d}\]', **right_title_kwargs)
 
 fileE = open('sin_proj_error.dat', 'rb')
 E = pickle.load(fileE)
@@ -319,7 +319,7 @@ maxAbsE = np.max(np.abs(E))
 field = axes[2,0].tripcolor(X.ravel(), Y.ravel(), E/maxAbsE, shading='gouraud',
                             cmap=errorcmap, vmin=-1, vmax=1)
 cbar = fig.colorbar(field, ax=axes[2,0])
-cbar.set_label(r'\[\normalise{f-u}\]', **right_title_kwargs)
+cbar.set_label(r'\[\normalise{u-u^d}\]', **right_title_kwargs)
 
 fig.text(0.5,0.613,'Normalised Exact Solution Functions', fontsize='large',
          horizontalalignment='center', verticalalignment='center')
@@ -368,7 +368,7 @@ axL2.axhline(4, linestyle=':', color=black, label='4th order', zorder=0,
 # axL1.minorticks_off()
 axL1.set_title(r'Doubly-Periodic BCs')
 axL1.set_xlabel(r'$\log_2(N_xN_y)$')
-axL1.set_ylabel(r'$\norm{f-u}$', **left_title_kwargs)
+axL1.set_ylabel(r'$\norm{u-u^d}$', **left_title_kwargs)
 axL2.set_ylabel(r'Intra-step Order of Convergence')
 leg = axL1.legend(loc='lower left', framealpha=1)
 leg.remove()
@@ -376,6 +376,8 @@ Nmin = min([min(N[i]) for i in range(len(N))])
 Nmax = max([max(N[i]) for i in range(len(N))])
 Nstep = 2
 axL1.set_xticks(np.linspace(Nmin, Nmax, (Nmax - Nmin)//Nstep + 1))
+axL1.set_yticks((1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-3, 1e-2, 1e-1))
+axL1.yaxis.get_minor_locator().set_params(numticks=99, subs='auto')
 ordb = 1
 ordt = 5
 ordstep = 1
@@ -409,7 +411,7 @@ axR2.axhline(4, linestyle=':', color=black, label='4th order', zorder=0,
 # axR1.minorticks_off()
 axR1.set_title('Dirichlet BCs')
 axR1.set_xlabel(r'$\log_2(N_xN_y)$')
-axR1.set_ylabel(r'$\norm{f-u}$', **left_title_kwargs)
+axR1.set_ylabel(r'$\norm{u-u^d}$', **left_title_kwargs)
 axR2.set_ylabel(r'Intra-step Order of Convergence')
 leg = axR1.legend(loc='upper right', framealpha=1)
 leg.remove()
@@ -420,6 +422,8 @@ axR1.set_xticks(np.linspace(Nmin, Nmax, (Nmax - Nmin)//Nstep + 1))
 axR2.set_ylim(ordb, ordt)
 axR2.set_yticks(np.linspace(ordb, ordt, int((ordt - ordb)/ordstep) + 1))
 axR1.set_ylim(top=2)
+axR1.set_yticks((1e-6, 1e-5, 1e-4, 1e-3, 1e-3, 1e-2, 1e-1, 1e0))
+axR1.yaxis.get_minor_locator().set_params(numticks=99, subs='auto')
 axR2.add_artist(leg)
 
 # fig.savefig('fcimls_projection_conv.pdf', bbox_inches='tight', pad_inches=0)

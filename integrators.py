@@ -144,11 +144,12 @@ class Integrator(metaclass=ABCMeta):
         kwargs["M"] = self.P
         for i in range(nSteps):
             self.timestep += 1
-            self.sim.u, info = sp_la.lgmres(self.LHS,
-                self.RHS @ self.sim.u + self.sim.b, x0=self.sim.u, **kwargs)
-            if (info != 0):
-                print(f'TS {self.timestep}: solution failed with error '
-                      f'code {info}')
+            # self.sim.uI, info = sp_la.lgmres(self.LHS,
+            #     self.RHS @ self.sim.uI + self.sim.b, x0=self.sim.uI, **kwargs)
+            # if (info != 0):
+            #     print(f'TS {self.timestep}: solution failed with error '
+            #           f'code {info}')
+            self.sim.uI = self.invLHS.solve(self.RHS @ self.sim.uI + self.sim.b)
         self.time = self.timestep * self.dt
 
 
@@ -172,7 +173,9 @@ class CrankNicolson(Integrator):
         self.RHS = M/dt + 0.5*R
         self.LHS = self.RHS - R
         self.precondition(P, **kwargs)
-
+        
+        self.invLHS = sp_la.splu(self.LHS)
+        
 
 class LowStorageRK(Integrator):
     @property
@@ -197,25 +200,25 @@ class LowStorageRK(Integrator):
     def stepNotMassLumped(self, nSteps = 1, **kwargs):
         kwargs["M"] = self.P
         for i in range(nSteps):
-            uTemp = self.sim.u
+            uTemp = self.sim.uI
             for beta in self.betas:
                 self.dudt, info = sp_la.lgmres(self.LHS,
                     self.RHS @ uTemp + self.sim.b, x0=self.dudt, **kwargs)
                 # self.dudt = sp_la.spsolve(self.LHS, self.RHS @ uTemp + self.sim.b)
-                uTemp = self.sim.u + beta*self.dt*self.dudt
+                uTemp = self.sim.uI + beta*self.dt*self.dudt
                 if (info != 0):
                     print(f'TS {self.timestep}: solution failed with error '
                           f'code {info}')
-            self.sim.u = uTemp
+            self.sim.uI = uTemp
             self.timestep += 1
         self.time = self.timestep * self.dt
 
     def stepMassLumped(self, nSteps = 1, **kwargs):
         for i in range(nSteps):
-            uTemp = self.sim.u
+            uTemp = self.sim.uI
             for beta in self.betas:
                 self.dudt = self.LHS @ (self.RHS @ uTemp + self.sim.b)
-                uTemp = self.sim.u + beta*self.dt*self.dudt
-            self.sim.u = uTemp
+                uTemp = self.sim.uI + beta*self.dt*self.dudt
+            self.sim.uI = uTemp
             self.timestep += 1
         self.time = self.timestep * self.dt

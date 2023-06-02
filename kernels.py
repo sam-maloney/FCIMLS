@@ -28,9 +28,18 @@ CubicSpline : Kernel
 QuarticSpline : Kernel
     .. math:: w(r) = -3r^4 + 8r^3 - 6r^2 + 1
 QuinticSpline : Kernel
-    .. math:: w(r) = -6r^5 + 15r^4 - 10r^3 + 1
+    .. math::
+        w(r)=
+        \\begin{cases}
+        -\\frac{405}{11}r^5 + \\frac{405}{11}r^4 - \\frac{90}{11}r^2 + 1, & r < \\frac{1}{3} \\\\
+        \\frac{405}{22}r^5 - \\frac{1215}{22}r^4 + \\frac{675}{11}r^3 - \\frac{315}{11}r^2 + \\frac{75}{22}r^1 + \\frac{17}{22}, & \\frac{1}{3} \\leq r < \\frac{2}{3} \\\\
+        -\\frac{81}{22}r^5 + \\frac{405}{22}r^4 - \\frac{405}{11}r^3 + \\frac{405}{11}r^2 - \\frac{405}{22}r^1 + \\frac{81}{22}, & \\frac{2}{3} \\leq r < 1
+        \\end{cases}
+    from https://doi.org/10.1061/(ASCE)EM.1943-7889.0001176 page 21 (here normalised to 1 at r=0)
 SimpleQuinticSpline : Kernel
     .. math:: w(r) = -6r^5 + 15r^4 - 10r^3 + 1
+SepticSpline : Kernel
+    .. math:: w(r) = -8r^7 + 35r^6 - 56r^5 + 35r^4 - 7r^2 + 1
 GenericSpline : Kernel
     .. math:: w(r) = (1 - r^2)^n
 Gaussian : Kernel
@@ -310,6 +319,7 @@ class QuarticSpline(Kernel):
         return w, dwdr, d2wdr2
 
 class QuinticSpline(Kernel):
+# https://doi.org/10.1061/(ASCE)EM.1943-7889.0001176 page 21
     @property
     def name(self):
         return 'quintic'
@@ -407,6 +417,44 @@ class SimpleQuinticSpline(Kernel):
             w[i0] = -8/3*r5 + 5*r4 - 10/3*r2 + 1
             dwdr[i0] = -40/3*r4 + 20*r3 - 20/3*r1
             d2wdr2[i0] = -160/3*r3 + 60*r2 - 20/3
+        return w, dwdr, d2wdr2
+    
+class SepticSpline(Kernel):
+    @property
+    def name(self):
+        return 'septicQuintic'
+
+    def w(self, r):
+        i0 = r < 1
+        w = np.zeros(r.size)
+        if i0.any():
+            r1 = r[i0]; r2 = r1*r1; r3 = r2*r1; r4 = r2*r2; r5 = r3*r2
+            r6 = r3*r3; r7 = r4*r3
+            w[i0] = -8*r7 + 35*r6 - 56*r5 + 35*r4 - 7*r2 + 1
+        return w
+
+    def dw(self, r):
+        i0 = r < 1
+        w = np.zeros(r.size)
+        dwdr = w.copy()
+        if i0.any():
+            r1 = r[i0]; r2 = r1*r1; r3 = r2*r1; r4 = r2*r2; r5 = r3*r2
+            r6 = r3*r3; r7 = r4*r3
+            w[i0] = -8*r7 + 35*r6 - 56*r5 + 35*r4 - 7*r2 + 1
+            dwdr[i0] = -56*r6 + 210*r5 - 280*r4 + 140*r3 - 14*r1
+        return w, dwdr
+
+    def d2w(self, r):
+        i0 = r < 1
+        w = np.zeros(r.size)
+        dwdr = w.copy()
+        d2wdr2 = w.copy()
+        if i0.any():
+            r1 = r[i0]; r2 = r1*r1; r3 = r2*r1; r4 = r2*r2; r5 = r3*r2
+            r6 = r3*r3; r7 = r4*r3
+            w[i0] = -8*r7 + 35*r6 - 56*r5 + 35*r4 - 7*r2 + 1
+            dwdr[i0] = -56*r6 + 210*r5 - 280*r4 + 140*r3 - 14*r1
+            d2wdr2[i0] = -336*r5 + 1050*r4 - 1120*r3 + 420*r2 - 14
         return w, dwdr, d2wdr2
 
 class GenericSpline(Kernel):

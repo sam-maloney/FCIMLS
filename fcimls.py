@@ -235,7 +235,7 @@ class FciMlsSim:
 
         """
         if isinstance(kernel, kernels.Kernel):
-            self.kernel = kernel.kernel
+            self.kernel = kernel
             return
         kernel = kernel.lower()
         if kernel == 'linear':
@@ -252,6 +252,8 @@ class FciMlsSim:
             self.kernel = kernels.QuinticSpline()
         elif kernel == 'simpleQuintic':
             self.kernel = kernels.SimpleQuinticSpline()
+        elif kernel == 'septic':
+            self.kernel = kernels.SepticSpline()
         elif kernel == 'gaussian':
             self.kernel = kernels.Gaussian()
         elif kernel == 'bump':
@@ -934,25 +936,25 @@ class FciMlsSim:
         ci[index:index + nQuads] = np.arange(nQuads)
         index += nQuads
 
-        # ##### Using SuiteSparse min2norm (QR based solver) #####
-        # self.vci_solver = 'ssqr.min2norm'
-        # G = sp.csc_matrix((gd[:index], (ri[:index], ci[:index])),
-        #                   shape=(np.iinfo('int32').max + 1, nQuads))
-        # G._shape = (nConstraints, nQuads)
-        # del gd, ci, ri, offsets, weights, quads
-        # start_time = default_timer()
-        # # ### solve for quadWeights directly (doesn't work as well!)
-        # # rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
-        # # quadWeights = ssqr.min2norm(G, rhs).ravel()
-        # ### solve for corrections to quadWeights
-        # quadWeights = np.concatenate(quadWeightsList)
-        # if vci == 1:
-        #     rhs = np.append(self.gradphiSumsOld.T.ravel(), 0)
-        # elif vci == 2:
-        #     rhs = np.append(self.rOld.T.ravel(), 0)
-        # quadWeightCorrections = ssqr.min2norm(G, rhs).ravel()
-        # quadWeights += quadWeightCorrections
-        # print(f'xi solve time = {default_timer()-start_time} s')
+        ##### Using SuiteSparse min2norm (QR based solver) #####
+        self.vci_solver = 'ssqr.min2norm'
+        G = sp.csc_matrix((gd[:index], (ri[:index], ci[:index])),
+                          shape=(np.iinfo('int32').max + 1, nQuads))
+        G._shape = (nConstraints, nQuads)
+        del gd, ci, ri, offsets, weights, quads
+        start_time = default_timer()
+        # ### solve for quadWeights directly (doesn't work as well!)
+        # rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
+        # quadWeights = ssqr.min2norm(G, rhs).ravel()
+        ### solve for corrections to quadWeights
+        quadWeights = np.concatenate(quadWeightsList)
+        if vci == 1:
+            rhs = np.append(self.gradphiSumsOld.T.ravel(), 0)
+        elif vci == 2:
+            rhs = np.append(self.rOld.T.ravel(), 0)
+        quadWeightCorrections = ssqr.min2norm(G, rhs).ravel()
+        quadWeights += quadWeightCorrections
+        print(f'xi solve time = {default_timer()-start_time} s')
         
         # ##### Using sparse_dot_mkl (QR based solver) (not-working) #####
         # self.vci_solver = 'sparse_dot_mkl.sparse_qr_solve_mkl'
@@ -968,37 +970,37 @@ class FciMlsSim:
         # quadWeights = sparse_dot_mkl.sparse_qr_solve_mkl(G, rhs).ravel()
         # print(f'xi solve time = {default_timer()-start_time} s')
 
-        ##### Using scipy.sparse.linalg, much slower, but uses less memory #####
-        G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),
-                                shape=(nConstraints, nQuads))
-        maxit = 100*nQuads
-        tol = 1e-10
-        start_time = default_timer()
-        # ### solve for quadWeights directly (does not work nearly as well!)
-        # rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
-        # # quadWeights = sp_la.lsmr(self.G, rhs, atol=tol, btol=tol, maxiter=maxit)[0]
+        # ##### Using scipy.sparse.linalg, much slower, but uses less memory #####
+        # G = sp.csr_matrix((gd[:index], (ri[:index], ci[:index])),
+        #                         shape=(nConstraints, nQuads))
+        # maxit = 100*nQuads
+        # tol = 1e-10
+        # start_time = default_timer()
+        # # ### solve for quadWeights directly (does not work nearly as well!)
+        # # rhs = np.append(vciBints.T.ravel(), self.xmax*self.ymax)
+        # # # quadWeights = sp_la.lsmr(self.G, rhs, atol=tol, btol=tol, maxiter=maxit)[0]
+        # # # self.vci_solver = 'scipy.sparse.linalg.lsmr'
+        # # quadWeights = sp_la.lsqr(self.G, rhs, atol=tol, btol=tol, iter_lim=maxit)[0]
+        # # self.vci_solver = 'scipy.sparse.linalg.lsqr'
+        # ### solve for corrections to quadWeights
+        # quadWeights = np.concatenate(quadWeightsList)
+        # if vci == 1:
+        #     rhs = np.append(self.gradphiSumsOld.T.ravel(), 0)
+        # elif vci == 2:
+        #     rhs = np.append(self.rOld.T.ravel(), 0)
+        # # scale rows of G
+        # for i in range(G.shape[0]):
+        #     norm = np.sqrt((G.data[G.indptr[i]:G.indptr[i+1]]**2).sum())
+        #     G.data[G.indptr[i]:G.indptr[i+1]] /= norm
+        #     rhs[i] /= norm
         # # self.vci_solver = 'scipy.sparse.linalg.lsmr'
-        # quadWeights = sp_la.lsqr(self.G, rhs, atol=tol, btol=tol, iter_lim=maxit)[0]
+        # # quadWeightCorrections = sp_la.lsmr(G, rhs, atol=tol, btol=tol, maxiter=maxit)
         # self.vci_solver = 'scipy.sparse.linalg.lsqr'
-        ### solve for corrections to quadWeights
-        quadWeights = np.concatenate(quadWeightsList)
-        if vci == 1:
-            rhs = np.append(self.gradphiSumsOld.T.ravel(), 0)
-        elif vci == 2:
-            rhs = np.append(self.rOld.T.ravel(), 0)
-        # scale rows of G
-        for i in range(G.shape[0]):
-            norm = np.sqrt((G.data[G.indptr[i]:G.indptr[i+1]]**2).sum())
-            G.data[G.indptr[i]:G.indptr[i+1]] /= norm
-            rhs[i] /= norm
-        # self.vci_solver = 'scipy.sparse.linalg.lsmr'
-        # quadWeightCorrections = sp_la.lsmr(G, rhs, atol=tol, btol=tol, maxiter=maxit)
-        self.vci_solver = 'scipy.sparse.linalg.lsqr'
-        quadWeightCorrections = sp_la.lsqr(G, rhs, atol=tol, btol=tol, iter_lim=maxit)
-        if quadWeightCorrections[1] == 7:
-            print('Max iterations reached in xi solve')
-        quadWeights += quadWeightCorrections[0]
-        print(f'xi solve time = {default_timer()-start_time} s')
+        # quadWeightCorrections = sp_la.lsqr(G, rhs, atol=tol, btol=tol, iter_lim=maxit)
+        # if quadWeightCorrections[1] == 7:
+        #     print('Max iterations reached in xi solve')
+        # quadWeights += quadWeightCorrections[0]
+        # print(f'xi solve time = {default_timer()-start_time} s')
         
         self.G = G
         # del G, rhs, quadWeightsList
